@@ -1,0 +1,6 @@
+Anglan_Crawler_Data/
+.venv/
+.workbuddy/
+.idea/
+__pycache__/
+*.pyc
