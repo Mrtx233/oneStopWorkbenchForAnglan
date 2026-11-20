@@ -59,6 +59,17 @@ def deterministic_variant_sku(product_md5, variant_index):
     return f"{code[0:5]}-{code[5:10]}-{code[10:15]}"
 
 
+def _dedup_variant_sku(product_md5, variant_index, used_skus):
+    # 颜色拆分会让同一 md5 对应多行商品，仅靠 md5+序号派生仍可能碰撞；这里按序号递增
+    # 兜底去重，保证每个变体/单值 SKU 全局唯一。
+    sku = deterministic_variant_sku(product_md5, variant_index)
+    while sku in used_skus:
+        variant_index += 1
+        sku = deterministic_variant_sku(product_md5, variant_index)
+    used_skus.add(sku)
+    return sku
+
+
 def _split_styles(value):
     # styles 按 '#' 切段（只切未转义分隔符）；兼容旧数据 '$' 开头缺属性名前导
     if pd.isna(value):
@@ -97,10 +108,11 @@ def WPAdd(value, obj):
 
 
 def _export_prices(sale, compare):
-    """有有效划线价时 Sale=售价、Regular=划线价；无优惠时售价写 Regular、Sale 留空。"""
+    """有有效折扣（划线价高于售价）时 Sale=售价、Regular=划线价；否则售价写 Regular、Sale 留空。"""
     try:
         current, original = Decimal(str(sale)), Decimal(str(compare))
-        paired = current.is_finite() and original.is_finite() and 0 < current <= original
+        # 严格小于：售价等于划线价（平价）不算折扣，否则无折扣商品会被导出成折扣商品
+        paired = current.is_finite() and original.is_finite() and 0 < current < original
     except (InvalidOperation, ValueError):
         paired = False
     return (sale, compare) if paired else ('', sale)
@@ -145,6 +157,8 @@ def convert_to_wp(input_file_name, output_file_name):
 
     rows = []
     used_parent_skus = set()
+    used_variant_skus = set()  # 变体/单值商品 SKU 全量去重：颜色拆分后同 md5 会拆成多行，
+    # 仅靠 md5+序号派生仍会碰撞，这里兜底保证每个变体 SKU 全局唯一。
     total = len(input_df)
 
     for idx in range(total):
@@ -197,7 +211,7 @@ def convert_to_wp(input_file_name, output_file_name):
 
         if not has_real_option:
             # 单值商品：simple，SKU 直接沿用确定性派生的变体 SKU
-            variant_sku = deterministic_variant_sku(md5, 0)
+            variant_sku = _dedup_variant_sku(md5, 0, used_variant_skus)
             first = variants[0] if variants else {'sale': None, 'compare': None}
             sale_str, reg_str = _export_prices(first['sale'] or '', first['compare'] or '')
             entity = {
@@ -249,7 +263,7 @@ def convert_to_wp(input_file_name, output_file_name):
                 parent["Attribute 3 visible"] = "1"
                 parent["Attribute 3 global"] = "1"
             variation = {
-                "Type": "variation", "SKU": deterministic_variant_sku(md5, i),
+                "Type": "variation", "SKU": _dedup_variant_sku(md5, i, used_variant_skus),
                 "Name": parent["Name"] + WPTitle(v['opt1_value'], v['opt2_value'], v['opt3_value']),
                 "Published": "1", "Visibility in catalog": "visible", "Description": "",
                 "In stock?": "1", "Stock": "99999",

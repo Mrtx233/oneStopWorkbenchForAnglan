@@ -3,6 +3,7 @@ from common.atomic_io import replace_file
 from dataclasses import dataclass
 from pathlib import Path
 import hashlib
+import re
 import pandas as pd
 
 
@@ -56,12 +57,20 @@ def run(input_file, stop=None):
         # 递归收集所有十字段表：兼容切分后「每份一个文件夹，内分 csv/」的嵌套结构。
         # 阶段四自己的产物目录（原价/ 价格匹配/）与 json 目录里的内容要排除，避免重复并入。
         skip_dirs = {"原价", "价格匹配", "json"}
+        # 切分产物优先：目录里存在阶段 03.1 的切分产物（<域名>_style_N/ 或 <域名>_style_按title拆分/）
+        # 时，只收集切分产物，跳过根目录的原表 _style.csv，避免同一批商品被原表与切分产物重复并入。
+        has_split_products = any(
+            d.is_dir() and re.match(r".*_style_(\d+|按title拆分)$", d.name)
+            for d in source_dir.iterdir()
+        )
         tables = sorted(
             p for p in source_dir.rglob("*.csv")
             if p.is_file()
             and p.resolve() not in excluded_paths
             and not p.name.startswith(("~$", "."))
             and not any(part.lower() in skip_dirs for part in p.relative_to(source_dir).parts[:-1])
+            # 有切分产物时，跳过直接位于 source_dir 根目录下的原表 _style.csv
+            and not (has_split_products and p.parent == source_dir and p.name.endswith("_style.csv"))
         )
         if not tables:
             raise ValueError(f"目录里没有可合并的 csv：{source_dir}")
