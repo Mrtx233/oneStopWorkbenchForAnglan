@@ -9,7 +9,6 @@ from app.constants import PROXY_SERVER
 from app.project_paths import REPO
 from app.user_settings import save_user_settings
 from common.step_loader import load_step
-from .theme import SIDE, SIDE_FG, SIDE_ON, SIDE_ON_FG
 
 
 def _parse_skip_images(text):
@@ -40,19 +39,11 @@ def _parse_skip_images(text):
 
 class CrawlerDialogs:
     def show(self, index):
-        # 切页：把目标 panel 提到最上层，并重绘导航项高亮（当前页用 SIDE_ON 亮底+加粗）。
+        # 切页：把目标 panel 提到最上层，由导航项统一绘制选中状态。
         self.current = index
         self.panels[index].tkraise()
         for i, button in self.nav.items():
-            on = i == index
-            bg = SIDE_ON if on else SIDE
-            button.configure(
-                bg=bg,
-                fg=SIDE_ON_FG if on else SIDE_FG,
-                font=self.nav_font_on if on else self.nav_font,
-            )
-            self.nav_rows[i].configure(bg=bg)
-            self.nav_hints[i].configure(bg=bg, fg='#6f675e' if on else '#a89f93')
+            button.set_selected(i == index)
         # 进入商品页(2)时自动刷新域名文件列表，省去手点「刷新列表」。
         if index == 2:
             self.refresh_files()
@@ -60,6 +51,7 @@ class CrawlerDialogs:
     def refresh_paths(self):
         # 参数一变就清空可能过期的预览与统计，避免用户误读上一轮结果。
         self.preview.delete(*self.preview.get_children())
+        self._sync_preview_hint()
         self.stats.set('')
 
     def on_setting_changed(self):
@@ -73,6 +65,7 @@ class CrawlerDialogs:
         self.product_files.delete(0, 'end')
         folder = Path(self.project.get()) / 'Json'
         if not folder.is_dir():
+            self._sync_file_hint()
             return
         for path in sorted(folder.iterdir()):
             # 过滤掉索引文件与恢复中间态，只留真正可作为采集目标的域名文件。
@@ -83,6 +76,7 @@ class CrawlerDialogs:
             if path.suffix.lower() == '.json' and (folder / (path.stem + '.csv')).exists():
                 continue
             self.product_files.insert('end', path.name)
+        self._sync_file_hint()
 
     def browse_project(self):
         # 选项目目录：initialdir 优先当前输入，空则回仓库根 REPO；用户取消(空串)时不改值。

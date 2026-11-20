@@ -1,36 +1,60 @@
-"""工作台配色与字体。暖纸底、墨色导航、绿色主操作。"""
+"""曜石黑金磨砂工作台的共享色板。"""
 import tkinter.font as tkfont
 
-# 全局主题色常量：build/pages/dialogs/runtime 各处引用，保证配色统一、改色只改这里。
-BG = '#f3efe7'                # 暖纸底色，主面板背景
-TEXT = '#1c1915'              # 墨色正文
-MUTED = '#6f675e'             # 次要说明文字（灰）
-LINE = '#ddd4c6'              # 分隔线 / 输入框描边
-WHITE = '#fffcf8'             # 输入框、卡片等亮面
-SIDE = '#1f1c18'              # 左侧导航栏底色（深墨）
-SIDE_HOVER = '#312c26'        # 导航项悬停底色
-SIDE_FG = '#e7e1d6'           # 导航项默认文字色
-SIDE_ON = '#f3efe7'           # 当前选中导航项底色（与正文区同色，形成高亮块）
-SIDE_ON_FG = '#1c1915'        # 当前选中导航项文字色
-PRIMARY = '#1f6b4a'           # 主操作绿（开始 / 采集 / 导出按钮、进度条、选中态）
-PRIMARY_HOVER = '#174f37'     # 主操作绿悬停 / 描边
-DANGER = '#8d3030'            # 危险操作红（停止按钮）
-DANGER_HOVER = '#6e2424'      # 危险红悬停 / 描边
-LOG_BG = '#1b1916'            # 日志窗口深色背景
-LOG_FG = '#e8e2d6'            # 日志窗口文字色
-ACCENT = '#1f6b4a'            # 强调色（kicker 小标题），与主绿一致
+BG = '#14161a'
+SURFACE = '#24262b'
+INPUT_BG = '#1a1c20'
+TEXT = '#eeeae2'
+MUTED = '#aaa59a'
+PLACEHOLDER = '#9c968c'
+LINE = '#595248'
+SOFT = '#292b30'
+RAISED = '#2e3035'
+HOVER = '#393b40'
+PRESSED = '#202226'
+SIDE = '#1d1f24'
+SIDE_HOVER = '#2b2c30'
+SIDE_FG = '#c4beb2'
+SIDE_ON = '#373126'
+SIDE_ON_FG = '#efcf90'
+PRIMARY = '#d1b06f'
+PRIMARY_HOVER = '#e2c58a'
+PRIMARY_PRESSED = '#b99959'
+PRIMARY_FG = '#191711'
+FOCUS = '#edca80'
+SELECTION_BG = '#433a29'
+SELECTION_FG = '#efcf90'
+DISABLED_BG = '#34322d'
+DISABLED_FG = '#8c8474'
+DANGER = '#e1a292'
+DANGER_BG = '#3b2b29'
+DANGER_HOVER = '#4a332e'
+DANGER_PRESSED = '#583b34'
+SCROLL = '#57534b'
+SCROLL_HOVER = '#7b705b'
+RIM = '#464139'
+SHADOWS = ('#101114', '#151619', '#1a1b1e')
+LOG_BG = '#17191d'
+LOG_FG = '#dcd6ca'
+ACCENT = PRIMARY
 
-# 候选字体族：按顺序在系统中探测，匹配到第一个即用；跨 macOS / Windows / Linux 兜底。
-UI_CANDIDATES = (
-    'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei UI',
-    'Noto Sans CJK SC', 'Heiti SC', 'Songti SC',
+# 少量暖金和石墨柔光，让浮动面板与窗口背景形成层次。
+AMBIENT_BASE = (20, 22, 26)
+AMBIENT_CLOUDS = (
+    (.05, .10, .28, (90, 73, 43), .28),
+    (.78, .12, .36, (56, 59, 65), .32),
+    (.88, .92, .33, (87, 66, 37), .24),
+    (.28, .85, .30, (47, 49, 55), .25),
 )
-# 等宽字体：日志框、分类输入框用，保证对齐与可读。
-MONO_CANDIDATES = ('Menlo', 'SF Mono', 'Consolas', 'Monaco', 'DejaVu Sans Mono')
+
+UI_CANDIDATES = (
+    'Microsoft YaHei UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Noto Sans CJK SC', 'Heiti SC',
+)
+MONO_CANDIDATES = ('Cascadia Code', 'Consolas', 'SF Mono', 'Menlo', 'DejaVu Sans Mono')
 
 
 def choose_font(root, candidates):
-    # 从候选列表挑一个本机已安装的字体族；全部缺失时回退 Tk 默认字体，避免启动崩。
     have = set(tkfont.families(root))
     for name in candidates:
         if name in have:

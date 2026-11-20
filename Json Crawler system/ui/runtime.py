@@ -6,7 +6,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 from app.constants import NAMES, STATUS
-from .theme import BG, LOG_BG, LOG_FG, WHITE
+from .theme import LINE, LOG_BG, LOG_FG, MUTED, SURFACE, TEXT
 
 
 class CrawlerRuntime:
@@ -71,20 +71,22 @@ class CrawlerRuntime:
         window.title('运行日志 · Anglan')
         window.geometry('980x620')
         window.minsize(720, 420)
-        window.configure(bg=BG)
+        window.configure(bg=SURFACE)
         # 关窗不销毁、只隐藏(withdraw)：保留缓冲，下次 show_logs 复用同一窗口。
         window.protocol('WM_DELETE_WINDOW', window.withdraw)
-        bar = ttk.Frame(window, padding=(16, 12))
+        bar = ttk.Frame(window, padding=(22, 18))
         bar.pack(fill='x')
         ttk.Label(bar, text='运行日志', font=(self.ui_family, 16, 'bold')).pack(side='left')
+        ttk.Label(bar, text='本次会话', foreground=MUTED).pack(side='left', padx=(12, 0))
         ttk.Button(bar, text='保存日志', command=self.save_log).pack(side='right')
         ttk.Button(bar, text='清空', command=self.clear_log).pack(side='right', padx=8)
         # 深色日志文本框（LOG_BG/LOG_FG），等宽字体，按词折行；建好后置 disabled 只读。
         self.log_text = scrolledtext.ScrolledText(
-            window, bg=LOG_BG, fg=LOG_FG, insertbackground=WHITE,
-            font=(self.mono_family, 12), wrap='word', relief='flat', bd=0, padx=16, pady=12,
+            window, bg=LOG_BG, fg=LOG_FG, insertbackground=TEXT,
+            font=(self.mono_family, 11), wrap='word', relief='flat', bd=0, padx=18, pady=16,
+            highlightthickness=1, highlightbackground=LINE, highlightcolor=LINE,
         )
-        self.log_text.pack(fill='both', expand=True, padx=16, pady=(0, 16))
+        self.log_text.pack(fill='both', expand=True, padx=22, pady=(0, 22))
         self.log_text.insert('end', ''.join(self.logs))  # 回放本次会话已积累的全部日志
         self.log_text.configure(state='disabled')
 
@@ -142,6 +144,7 @@ class CrawlerRuntime:
                 for row in event['rows']:
                     # 按 Treeview 的列顺序取值，缺字段用空串兜底，避免 KeyError。
                     self.preview.insert('', 'end', values=[row.get(c, '') for c in self.preview['columns']])
+                self._sync_preview_hint()
                 # stats 追加组合数与本次显示条数。
                 self.stats.set(self.stats.get() + f' · {event["total"]} 个组合 · 显示 {len(event["rows"])} 条')
                 if event['missing']:

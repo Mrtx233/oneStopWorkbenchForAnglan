@@ -53,6 +53,11 @@ if _pil_ok:
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 from tkinter.ttk import Progressbar
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from workbench_ui import GlassBackground, GlassPanel, apply_glass_controls
 
 
 # =====================================================================
@@ -501,6 +506,16 @@ class ImageDownloader:
 # =====================================================================
 # 类二：ImageDownloaderGUI —— tkinter 图形界面
 # =====================================================================
+UI_COLORS = {
+    'background': '#14161a', 'surface': '#24262b', 'input': '#1a1c20',
+    'text': '#eeeae2', 'muted': '#aaa59a', 'line': '#595248', 'side': '#1d1f24',
+    'primary': '#d1b06f', 'primary_hover': '#e2c58a', 'primary_pressed': '#b99959',
+    'on_primary': '#191711', 'selection': '#433a29', 'selected_text': '#efcf90',
+    'focus': '#edca80', 'raised': '#2e3035', 'hover': '#393b40',
+    'disabled': '#34322d', 'disabled_text': '#8c8474', 'scroll': '#57534b',
+}
+
+
 class ImageDownloaderGUI:
     """
     WordPress 图片下载工具的图形界面。
@@ -513,15 +528,12 @@ class ImageDownloaderGUI:
     # ---------------------------------------------------------------
     def __init__(self):
         """创建主窗口、主题样式与初始状态，并构建界面布局。"""
-        # --- 主窗口 ---
         self.root = tk.Tk()
         self.root.title('WordPress 图片下载工具')
-        self.root.geometry('850x700')
+        self.root.geometry('1080x760')
+        self.root.minsize(900, 680)
         self.root.resizable(True, True)
-
-        # --- 界面主题 ---
-        style = ttk.Style()
-        style.theme_use('clam')
+        self._configure_theme()
 
         # --- 运行状态 ---
         self.downloader = None        # 当前的 ImageDownloader 实例
@@ -530,77 +542,205 @@ class ImageDownloaderGUI:
 
         self.setup_ui()   # 构建界面
 
+    def _configure_theme(self):
+        """独立语义色板，不依赖采集工作台模块或额外主题库。"""
+        from tkinter import font as tkfont
+        c = UI_COLORS
+        families = set(tkfont.families(self.root))
+        self.ui_font = next((name for name in ('Microsoft YaHei UI', 'PingFang SC',
+                           'Noto Sans CJK SC') if name in families), 'TkDefaultFont')
+        self.mono_font = next((name for name in ('Cascadia Code', 'Consolas', 'Menlo')
+                             if name in families), self.ui_font)
+        self.root.configure(bg=c['background'])
+        style = ttk.Style(self.root)
+        style.theme_use('clam')
+        style.configure('.', font=(self.ui_font, 10), background=c['surface'], foreground=c['text'])
+        style.configure('TFrame', background=c['surface'])
+        style.configure('TLabel', background=c['surface'], foreground=c['text'])
+        style.configure('Canvas.TFrame', background=c['background'])
+        style.configure('Canvas.TLabel', background=c['background'], foreground=c['muted'])
+        style.configure('Title.TLabel', background=c['background'], foreground=c['text'],
+                        font=(self.ui_font, 23, 'bold'))
+        style.configure('Brand.TLabel', background=c['background'], foreground=c['primary'],
+                        font=(self.ui_font, 9, 'bold'))
+        style.configure('Section.TLabel', font=(self.ui_font, 11, 'bold'))
+        style.configure('Muted.TLabel', foreground=c['muted'], font=(self.ui_font, 9))
+        style.configure('TButton', background=c['raised'], foreground=c['text'],
+                        bordercolor=c['line'], lightcolor=c['raised'], darkcolor=c['raised'],
+                        focuscolor=c['focus'], relief='flat', borderwidth=1, padding=(16, 9))
+        style.map('TButton', background=[('disabled', c['disabled']), ('pressed', c['side']),
+                                       ('active', c['hover'])],
+                  foreground=[('disabled', c['disabled_text'])],
+                  bordercolor=[('focus', c['focus'])],
+                  lightcolor=[('active', c['hover']), ('disabled', c['disabled'])],
+                  darkcolor=[('active', c['hover']), ('disabled', c['disabled'])])
+        style.configure('Primary.TButton', background=c['primary'], foreground=c['on_primary'],
+                        bordercolor=c['primary'], lightcolor=c['primary'], darkcolor=c['primary'],
+                        font=(self.ui_font, 10, 'bold'), padding=(25, 10))
+        style.map('Primary.TButton',
+                  background=[('disabled', c['disabled']), ('pressed', c['primary_pressed']),
+                              ('active', c['primary_hover'])],
+                  foreground=[('disabled', c['disabled_text'])],
+                  bordercolor=[('disabled', c['line']), ('focus', c['focus']), ('active', c['primary_hover'])],
+                  lightcolor=[('disabled', c['disabled']), ('pressed', c['primary_pressed']), ('active', c['primary_hover'])],
+                  darkcolor=[('disabled', c['disabled']), ('pressed', c['primary_pressed']), ('active', c['primary_hover'])])
+        for name in ('TEntry', 'TSpinbox', 'TCombobox'):
+            style.configure(name, fieldbackground=c['input'], background=c['input'],
+                            foreground=c['text'], insertcolor=c['text'], arrowcolor=c['muted'],
+                            bordercolor=c['line'], lightcolor=c['line'], darkcolor=c['line'],
+                            padding=(9, 7), arrowsize=12, selectbackground=c['selection'],
+                            selectforeground=c['selected_text'])
+            style.map(name, fieldbackground=[('disabled', c['disabled']), ('readonly', c['input'])],
+                      background=[('disabled', c['disabled']), ('active', c['raised']), ('readonly', c['input'])],
+                      foreground=[('disabled', c['disabled_text']), ('readonly', c['text'])],
+                      bordercolor=[('focus', c['focus'])],
+                      lightcolor=[('focus', c['focus'])], darkcolor=[('focus', c['focus'])])
+        style.configure('TCheckbutton', background=c['surface'], foreground=c['text'],
+                        indicatorbackground=c['input'], indicatorcolor=c['input'],
+                        bordercolor=c['line'], focuscolor=c['focus'], padding=(0, 4))
+        style.map('TCheckbutton', background=[('active', c['surface'])],
+                  foreground=[('disabled', c['disabled_text'])],
+                  indicatorcolor=[('disabled', c['disabled']), ('selected', c['primary'])])
+        style.configure('Horizontal.TProgressbar', background=c['primary'], troughcolor=c['input'],
+                        bordercolor=c['input'], lightcolor=c['primary'], darkcolor=c['primary'],
+                        borderwidth=0, thickness=5)
+        style.configure('TScrollbar', background=c['scroll'], troughcolor=c['input'],
+                        bordercolor=c['input'], arrowcolor=c['muted'],
+                        lightcolor=c['scroll'], darkcolor=c['scroll'], borderwidth=0)
+        style.map('TScrollbar', background=[('active', c['primary'])])
+        self.root.option_add('*TCombobox*Listbox.background', c['input'])
+        self.root.option_add('*TCombobox*Listbox.foreground', c['text'])
+        self.root.option_add('*TCombobox*Listbox.selectBackground', c['selection'])
+        self.root.option_add('*TCombobox*Listbox.selectForeground', c['selected_text'])
+        apply_glass_controls(self.root)
+
     # ---------------------------------------------------------------
     # 界面布局
     # ---------------------------------------------------------------
     def setup_ui(self):
-        """搭建整个窗口：CSV选择、WP地址、线程数、进度、日志、开始按钮。"""
-        # --- 主容器（带边距） ---
-        main_frame = ttk.Frame(self.root, padding='10')
-        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        self.root.columnconfigure(0, weight=1)   # 允许伸缩
-        self.root.rowconfigure(0, weight=1)
-        main_frame.columnconfigure(0, weight=1)
+        """左侧配置、右侧日志和独立任务浮层，保持原有输入及回调。"""
+        c = UI_COLORS
+        self.backdrop = GlassBackground(self.root)
+        self.backdrop.pack(fill='both', expand=True)
+        self.header_card = GlassPanel(self.backdrop, padding=(18, 10), fill=c['side'])
+        self.source_card = GlassPanel(self.backdrop, padding=(18, 10))
+        self.log_card = GlassPanel(self.backdrop, padding=20)
+        self.task_card = GlassPanel(self.backdrop, padding=(18, 10))
+        self._panel_windows = {
+            name: self.backdrop.create_window(0, 0, window=panel, anchor='nw')
+            for name, panel in (('header', self.header_card), ('source', self.source_card),
+                                ('log', self.log_card), ('task', self.task_card))
+        }
+        header = self.header_card.body
+        identity = tk.Frame(header, bg=c['side'])
+        identity.pack(side='left', fill='both', expand=True)
+        tk.Label(identity, text='ANGLAN  /  IMAGE DOWNLOADER', bg=c['side'], fg=c['primary'],
+                 font=(self.ui_font, 9, 'bold')).pack(anchor='w')
+        tk.Label(identity, text='图片下载工作台', bg=c['side'], fg=c['text'],
+                 font=(self.ui_font, 22, 'bold')).pack(anchor='w', pady=(6, 0))
+        journey = tk.Frame(header, bg=c['side'])
+        journey.pack(side='right', anchor='e', padx=(12, 0), pady=(10, 0))
+        for index, title in enumerate(('选择 CSV', '下载图片', '更新链接'), 1):
+            item = tk.Frame(journey, bg=c['side'])
+            item.pack(side='left', padx=(0, 16) if index < 3 else 0)
+            tk.Label(item, text=f'0{index}', bg=c['side'], fg=c['primary'],
+                     font=(self.mono_font, 11)).pack(anchor='w')
+            tk.Label(item, text=title, bg=c['side'], fg=c['muted'],
+                     font=(self.ui_font, 9)).pack(anchor='w', pady=(3, 0))
 
-        # ===== 区域 1：CSV 文件选择 =====
-        csv_frame = ttk.LabelFrame(main_frame, text='CSV 文件', padding='10')
-        csv_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
-        csv_frame.columnconfigure(1, weight=1)
+        source = self.source_card.body
+        source_head = ttk.Frame(source)
+        source_head.pack(fill='x', pady=(0, 6))
+        icon = tk.Canvas(source_head, width=36, height=42, bg=c['surface'],
+                         highlightthickness=0, bd=0)
+        icon.pack(side='left', padx=(0, 12))
+        icon.create_polygon(7, 3, 23, 3, 31, 11, 31, 38, 7, 38, outline=c['primary'],
+                            fill=c['input'], width=1.2)
+        icon.create_line(23, 3, 23, 11, 31, 11, fill=c['primary'])
+        for y in (20, 25, 30):
+            icon.create_line(12, y, 25, y, fill=c['muted'])
+        title = ttk.Frame(source_head)
+        title.pack(side='left')
+        ttk.Label(title, text='下载配置', style='Section.TLabel').pack(anchor='w')
+        ttk.Label(title, text='准备文件与目标站点', style='Muted.TLabel').pack(anchor='w', pady=(5, 0))
+        file_head = ttk.Frame(source)
+        file_head.pack(fill='x', pady=(0, 6))
+        ttk.Label(file_head, text='01  /  CSV 源文件', style='Muted.TLabel').pack(side='left')
+        ttk.Button(file_head, text='选择文件  ↗', command=self.select_csv_file).pack(side='right')
+        self.csv_path = tk.StringVar()
+        ttk.Entry(source, textvariable=self.csv_path, state='readonly').pack(fill='x')
+        self._section_rule(source, (4, 4))
+        ttk.Label(source, text='02  /  WordPress 站点', style='Muted.TLabel').pack(anchor='w', pady=(0, 7))
+        self.wp_site = tk.StringVar(value='https://willowyns.com/')
+        ttk.Entry(source, textvariable=self.wp_site).pack(fill='x')
+        self._section_rule(source, (4, 4))
+        thread_frame = ttk.Frame(source)
+        thread_frame.pack(fill='x')
+        ttk.Label(thread_frame, text='03  /  线程数 · 1–50', style='Muted.TLabel').pack(side='left')
+        self.workers = tk.IntVar(value=20)
+        ttk.Spinbox(thread_frame, from_=1, to=50, textvariable=self.workers, width=5).pack(side='right')
 
-        self.csv_path = tk.StringVar()   # 已选文件路径
-        ttk.Entry(csv_frame, textvariable=self.csv_path, state='readonly').grid(
-            row=0, column=0, sticky=(tk.W, tk.E), padx=(0, 10))
-        ttk.Button(csv_frame, text='选择文件', command=self.select_csv_file).grid(row=0, column=1)
+        log_frame = self.log_card.body
+        log_head = ttk.Frame(log_frame)
+        log_head.pack(fill='x', pady=(0, 14))
+        ttk.Label(log_head, text='运行日志', style='Section.TLabel').pack(side='left')
+        ttk.Label(log_head, text='●  当前会话', style='Muted.TLabel').pack(side='right')
+        ttk.Label(log_frame, text='下载记录、处理进度与输出位置将在这里显示。',
+                  style='Muted.TLabel').pack(anchor='w', pady=(0, 12))
+        self.log_text = scrolledtext.ScrolledText(
+            log_frame, height=5, width=28, wrap=tk.WORD, font=(self.mono_font, 10),
+            bg=c['input'], fg=c['text'], insertbackground=c['focus'],
+            selectbackground=c['selection'], selectforeground=c['selected_text'],
+            relief='flat', bd=0, highlightthickness=1, highlightbackground=c['line'],
+            highlightcolor=c['focus'], padx=14, pady=12)
+        self.log_text.pack(fill='both', expand=True)
+        self.log_text.vbar.destroy()
+        self.log_text.vbar = ttk.Scrollbar(self.log_text.frame, orient='vertical', command=self.log_text.yview)
+        self.log_text.vbar.pack(side='right', fill='y', before=self.log_text._w)
+        self.log_text.configure(yscrollcommand=self.log_text.vbar.set)
+        self.log_text.frame.configure(bg=c['input'])
 
-        # ===== 区域 2：WordPress 站点地址 =====
-        wp_frame = ttk.LabelFrame(main_frame, text='WordPress 地址', padding='10')
-        wp_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
-        wp_frame.columnconfigure(1, weight=1)
-
-        ttk.Label(wp_frame, text='网址:').grid(row=0, column=0, padx=(0, 10))
-        self.wp_site = tk.StringVar(value='https://willowyns.com/')  # 默认站点
-        wp_entry = ttk.Entry(wp_frame, textvariable=self.wp_site)
-        wp_entry.grid(row=0, column=1, sticky=(tk.W, tk.E))
-        # ===== 区域 3：下载设置（并发线程数） =====
-        thread_frame = ttk.LabelFrame(main_frame, text='下载设置', padding='10')
-        thread_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
-
-        ttk.Label(thread_frame, text='并发下载线程数:').grid(row=0, column=0, padx=(0, 10))
-        self.workers = tk.IntVar(value=20)   # 默认 20 线程
-        workers_spinbox = ttk.Spinbox(thread_frame, from_=1, to=50,
-                                      textvariable=self.workers, width=10)
-        workers_spinbox.grid(row=0, column=1, sticky=tk.W)
-        ttk.Label(thread_frame, text='(1-50，建议 10-30)', foreground='gray').grid(
-            row=0, column=2, padx=(10, 0))
-
-        # ===== 区域 4：下载进度条 =====
-        progress_frame = ttk.LabelFrame(main_frame, text='下载进度', padding='10')
-        progress_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
-        progress_frame.columnconfigure(0, weight=1)
-
+        task = self.task_card.body
+        self.start_button = ttk.Button(task, text='开始下载  →', command=self.start_download, style='Primary.TButton')
+        self.start_button.pack(side='right', padx=(24, 0))
+        progress_frame = ttk.Frame(task)
+        progress_frame.pack(side='left', fill='both', expand=True)
+        task_head = ttk.Frame(progress_frame)
+        task_head.pack(fill='x', pady=(0, 10))
+        ttk.Label(task_head, text='任务进度', style='Section.TLabel').pack(side='left')
+        self.progress_label = ttk.Label(task_head, text='等待开始...', style='Muted.TLabel')
+        self.progress_label.pack(side='left', fill='x', expand=True, padx=(14, 0))
         self.progress_var = tk.IntVar()
         self.progress_bar = Progressbar(progress_frame, variable=self.progress_var, maximum=100)
-        self.progress_bar.grid(row=0, column=0, sticky=(tk.W, tk.E))
-        self.progress_label = ttk.Label(progress_frame, text='等待开始...')
-        self.progress_label.grid(row=1, column=0, sticky=tk.W, pady=(5, 0))
+        self.progress_bar.pack(fill='x')
+        ttk.Label(progress_frame, text='图片与导出 CSV 保存在源文件目录', style='Muted.TLabel').pack(anchor='w', pady=(8, 0))
+        progress_frame.bind('<Configure>', lambda event: self.progress_label.configure(wraplength=max(100, event.width - 100)))
+        self.backdrop.bind('<Configure>', self._layout_workspace, add='+')
+        self._layout_workspace()
 
-        # ===== 区域 5：运行日志 =====
-        log_frame = ttk.LabelFrame(main_frame, text='运行日志', padding='10')
-        log_frame.grid(row=4, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
-        log_frame.columnconfigure(0, weight=1)
-        log_frame.rowconfigure(0, weight=1)
+    def _section_rule(self, parent, pady):
+        tk.Frame(parent, bg=UI_COLORS['line'], height=1).pack(fill='x', pady=pady)
 
-        self.log_text = scrolledtext.ScrolledText(log_frame, height=15, wrap=tk.WORD)
-        self.log_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-
-        # ===== 区域 6：开始下载按钮 =====
-        button_frame = ttk.Frame(main_frame)
-        button_frame.grid(row=5, column=0, sticky=(tk.W, tk.E))
-        self.start_button = ttk.Button(button_frame, text='开始下载', command=self.start_download)
-        self.start_button.pack(side=tk.LEFT)
-
-        # 日志区域可纵向拉伸，其余区域固定
-        main_frame.rowconfigure(4, weight=1)
+    def _layout_workspace(self, _event=None):
+        width, height = self.backdrop.winfo_width(), self.backdrop.winfo_height()
+        if width < 100 or height < 100:
+            return
+        margin, gap, header_height, task_height = 18, 14, 124, 120
+        inner_width = width - margin * 2
+        source_width = min(364, max(320, round(inner_width * .36)))
+        body_y = margin + header_height + gap
+        task_y = height - margin - task_height
+        body_height = max(100, task_y - gap - body_y)
+        bounds = {
+            'header': (margin, margin, inner_width, header_height),
+            'source': (margin, body_y, source_width, body_height),
+            'log': (margin + source_width + gap, body_y, inner_width - source_width - gap, body_height),
+            'task': (margin, task_y, inner_width, task_height),
+        }
+        for name, (x, y, w, h) in bounds.items():
+            item = self._panel_windows[name]
+            self.backdrop.coords(item, x, y)
+            self.backdrop.itemconfigure(item, width=w, height=h)
 
     # ---------------------------------------------------------------
     # 事件处理：选择 CSV 文件
