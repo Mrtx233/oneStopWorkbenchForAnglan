@@ -8,10 +8,10 @@ from app.user_settings import load_user_settings
 from controller import Controller
 from .glass import CONTROL_SLICE, indicator_image, rounded_image
 from .theme import (
-    ACCENT, BG, DANGER, DANGER_BG, DANGER_HOVER, DANGER_PRESSED,
+    BG, DANGER, DANGER_BG, DANGER_HOVER, DANGER_PRESSED,
     DISABLED_BG, DISABLED_FG, FOCUS, HOVER, INPUT_BG, LINE, MONO_CANDIDATES,
     MUTED, PRESSED, PRIMARY, PRIMARY_FG, PRIMARY_HOVER, PRIMARY_PRESSED, RAISED,
-    SCROLL, SCROLL_HOVER, SELECTION_BG, SELECTION_FG, SIDE, SOFT, SURFACE,
+    SCROLL, SCROLL_HOVER, SELECTION_BG, SELECTION_FG, SOFT, SURFACE,
     TEXT, UI_CANDIDATES, choose_font,
 )
 
@@ -21,7 +21,7 @@ class CrawlerBuild:
         # root 是 main.py 建好的 Tk 根窗口；这里保存引用并配置窗口标题、初始与最小尺寸。
         self.root = root
         root.title('Anglan · 采集工作台')
-        root.geometry('1280x880')          # 浮动面板的推荐尺寸
+        root.geometry('1200x800')
         root.minsize(1080, 760)            # 允许用户缩小的下限，防止控件被挤压重叠
         # controller 是与 UI 无关的调度器：真正跑阶段的是它的子进程，UI 只通过它发指令、读事件。
         self.controller = Controller()
@@ -73,7 +73,7 @@ class CrawlerBuild:
         self.split_price_col = tk.StringVar(value='price1')        # 均分拆分的价格列（price1/price2，空=保持原序）
         self.split_overwrite = tk.BooleanVar(value=True)           # 是否覆盖同名输出
         self.status = tk.StringVar(value='就绪')                   # 底栏状态行文本
-        self.lock_text = tk.StringVar(value='')                    # 顶栏「本轮参数」摘要，运行中才填
+        self.lock_text = tk.StringVar(value='')                    # 底栏「本轮参数」摘要，运行中才填
         self.stats = tk.StringVar(value='')                        # 分析页统计文本（商品数 / 组合数）
         self.buttons = []                  # 收集所有主操作按钮，运行时统一禁用、结束时统一恢复
         self._styles()                     # 先建 ttk 样式，后面的控件才能引用样式名
@@ -104,12 +104,10 @@ class CrawlerBuild:
         style.configure('.', font=(self.ui_family, 10), background=SURFACE, foreground=TEXT)
         style.configure('TFrame', background=SURFACE)
         style.configure('TLabel', background=SURFACE, foreground=TEXT)
-        style.configure('H.TLabel', font=(self.ui_family, 23, 'bold'), foreground=TEXT)
-        style.configure('Muted.TLabel', font=(self.ui_family, 9), foreground=MUTED)
-        style.configure('Kicker.TLabel', font=(self.ui_family, 9, 'bold'), foreground=ACCENT)
-        style.configure('Section.TLabel', font=(self.ui_family, 10, 'bold'), foreground=TEXT)
+        style.configure('H.TLabel', font=(self.ui_family, 24), foreground=TEXT)
+        style.configure('Muted.TLabel', font=(self.ui_family, 10), foreground=MUTED)
+        style.configure('Section.TLabel', font=(self.ui_family, 11, 'bold'), foreground=TEXT)
         style.configure('Status.TLabel', font=(self.ui_family, 10), foreground=TEXT)
-        style.configure('Hint.TLabel', font=(self.ui_family, 9), foreground=ACCENT)
         self._theme_images = []
         for name, kind, prefix in (('TCheckbutton', 'check', 'Checkbutton'),
                                    ('TRadiobutton', 'radio', 'Radiobutton')):
@@ -119,7 +117,7 @@ class CrawlerBuild:
                 {'selected': True, 'focused': True},
             )]
             self._theme_images.extend(images)
-            element = 'Glass.' + prefix + '.indicator'
+            element = 'Workbench.' + prefix + '.indicator'
             style.element_create(element, 'image', images[0],
                                  ('disabled', 'selected', images[3]), ('disabled', images[2]),
                                  ('focus', 'selected', images[5]), ('focus', images[4]),
@@ -129,7 +127,7 @@ class CrawlerBuild:
                 (element, {'side': 'left', 'sticky': ''}),
                 (prefix + '.label', {'side': 'left', 'sticky': 'nsw'}),
             ]})])
-            style.configure(name, background=SURFACE, foreground=TEXT, padding=(0, 3))
+            style.configure(name, background=SURFACE, foreground=TEXT, padding=(0, 4))
             style.map(name, background=[('active', SURFACE)],
                       foreground=[('disabled', MUTED), ('active', TEXT)])
 
@@ -147,45 +145,41 @@ class CrawlerBuild:
                 (disabled, disabled_edge), (fill, FOCUS),
             )]
             self._theme_images.extend(images)
-            element = 'Glass.' + name.replace('.', '_')
+            element = 'Workbench.' + name.replace('.', '_')
             style.element_create(element, 'image', images[0],
                                  ('disabled', images[3]), ('pressed', images[2]),
-                                 ('active', images[1]), ('focus', images[4]),
+                                 ('focus', images[4]), ('active', images[1]),
                                  border=CONTROL_SLICE, padding=0, sticky='nsew')
             style.layout(name, [(element, {'sticky': 'nsew', 'children': [
                 ('Button.padding', {'sticky': 'nsew', 'children': [
                     ('Button.label', {'sticky': 'nsew'})]})]})])
-            style.configure(name, padding=(16, 9), foreground=fg, background=SURFACE,
+            style.configure(name, padding=(16, 8), foreground=fg, background=SURFACE,
                             font=(self.ui_family, 10), anchor='center')
             style.map(name, foreground=[('disabled', disabled_fg)],
                       background=[('disabled', SURFACE), ('active', SURFACE), ('pressed', SURFACE)])
-        # 透明角使用所在面板的颜色，防止透出 clam 默认的灰色方形底。
-        style.configure('Sidebar.TButton', background=SIDE)
-        style.map('Sidebar.TButton', background=[('disabled', SIDE), ('active', SIDE), ('pressed', SIDE)])
-
         fields = [rounded_image(self.root, fill, edge) for fill, edge in (
             (INPUT_BG, LINE), (INPUT_BG, FOCUS), (SOFT, LINE),
         )]
         self._theme_images.extend(fields)
-        style.element_create('Glass.field', 'image', fields[0],
+        style.element_create('Workbench.field', 'image', fields[0],
                              ('disabled', fields[2]), ('focus', fields[1]),
                              border=CONTROL_SLICE, padding=0, sticky='nsew')
-        style.layout('TEntry', [('Glass.field', {'sticky': 'nsew', 'children': [
+        style.layout('TEntry', [('Workbench.field', {'sticky': 'nsew', 'children': [
             ('Entry.padding', {'sticky': 'nsew', 'children': [
                 ('Entry.textarea', {'sticky': 'nsew'})]})]})])
         for name in ('TEntry', 'TCombobox', 'TSpinbox'):
             style.configure(name, fieldbackground=INPUT_BG, background=INPUT_BG,
                             foreground=TEXT, insertcolor=TEXT, arrowcolor=MUTED,
                             bordercolor=LINE, lightcolor=LINE, darkcolor=LINE,
-                            padding=(8, 3), arrowsize=12)
+                            padding=(8, 4), arrowsize=12)
             style.map(name, fieldbackground=[('disabled', SOFT), ('readonly', INPUT_BG)],
-                      foreground=[('disabled', MUTED)], bordercolor=[('focus', PRIMARY)],
-                      lightcolor=[('focus', PRIMARY)], darkcolor=[('focus', PRIMARY)],
+                      foreground=[('disabled', MUTED)], bordercolor=[('focus', FOCUS)],
+                      lightcolor=[('focus', FOCUS)], darkcolor=[('focus', FOCUS)],
                       background=[('active', SOFT), ('readonly', INPUT_BG)],
                       selectbackground=[('!disabled', SELECTION_BG)],
                       selectforeground=[('!disabled', SELECTION_FG)])
         # 文字内边距与九宫格切片分别设置，修改圆角不会再意外改变控件高度。
-        style.configure('TEntry', padding=(10, 9), background=SURFACE)
+        style.configure('TEntry', padding=(12, 8), background=SURFACE)
         style.map('TEntry', background=[('disabled', SURFACE), ('readonly', SURFACE),
                                        ('focus', SURFACE), ('active', SURFACE)])
         self.root.option_add('*TCombobox*Listbox.background', INPUT_BG)
@@ -195,10 +189,10 @@ class CrawlerBuild:
         self.root.option_add('*TCombobox*Listbox.font', (self.ui_family, 10))
 
         style.configure('Treeview', background=INPUT_BG, foreground=TEXT, fieldbackground=INPUT_BG,
-                        rowheight=31, font=(self.ui_family, 10), borderwidth=0,
+                        rowheight=32, font=(self.ui_family, 10), borderwidth=0,
                         bordercolor=INPUT_BG, lightcolor=INPUT_BG, darkcolor=INPUT_BG)
         style.configure('Treeview.Heading', background=SOFT, foreground=MUTED, relief='flat',
-                        font=(self.ui_family, 9), padding=(10, 9), borderwidth=0)
+                        font=(self.ui_family, 10), padding=(12, 8), borderwidth=0)
         style.map('Treeview', background=[('selected', SELECTION_BG)],
                   foreground=[('selected', SELECTION_FG)])
         style.map('Treeview.Heading', background=[('active', HOVER)])
@@ -207,7 +201,7 @@ class CrawlerBuild:
                         borderwidth=0, thickness=4)
         style.configure('TScrollbar', background=SCROLL, troughcolor=SURFACE,
                         bordercolor=SURFACE, lightcolor=SCROLL, darkcolor=SCROLL,
-                        arrowcolor=MUTED, borderwidth=0, width=9, arrowsize=10)
+                        arrowcolor=MUTED, borderwidth=0, width=8, arrowsize=12)
         style.map('TScrollbar', background=[('active', SCROLL_HOVER)])
         for direction, sticky in (('Vertical', 'ns'), ('Horizontal', 'ew')):
             style.layout(direction + '.TScrollbar', [
@@ -215,15 +209,13 @@ class CrawlerBuild:
                     (direction + '.Scrollbar.thumb', {'expand': '1', 'sticky': 'nsew'})]})])
         self.root.configure(background=BG)
 
-    def heading(self, panel, title, text=None, kicker=None):
+    def heading(self, panel, title, text=None):
         head = ttk.Frame(panel)
-        head.pack(fill='x', pady=(0, 17))
-        if kicker:
-            ttk.Label(head, text=kicker, style='Kicker.TLabel').pack(anchor='w', pady=(0, 3))
+        head.pack(fill='x', pady=(0, 24))
         ttk.Label(head, text=title, style='H.TLabel').pack(anchor='w')
         if text:
             description = ttk.Label(head, text=text, style='Muted.TLabel', justify='left')
-            description.pack(anchor='w', pady=(5, 0), fill='x')
+            description.pack(anchor='w', pady=(4, 0), fill='x')
             head.bind('<Configure>', lambda e: description.configure(wraplength=max(100, e.width - 8)))
 
     def rule(self, panel, pady=(12, 12), side='top'):
@@ -231,13 +223,13 @@ class CrawlerBuild:
 
     def action(self, panel, text, callback):
         button = ttk.Button(panel, text=text, command=callback, style='Primary.TButton')
-        button.pack(anchor='w', pady=(14, 0))
+        button.pack(anchor='w', pady=(16, 0))
         self.buttons.append(button)
         return button
 
     def field(self, parent, label, variable, width=14):
         row = ttk.Frame(parent)
         row.pack(side='left', fill='x', expand=True, padx=(0, 12))
-        ttk.Label(row, text=label, style='Muted.TLabel').pack(anchor='w', pady=(0, 6))
+        ttk.Label(row, text=label, style='Muted.TLabel').pack(anchor='w', pady=(0, 8))
         ttk.Entry(row, textvariable=variable, width=width).pack(fill='x')
         return row

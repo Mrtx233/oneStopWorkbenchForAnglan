@@ -3,10 +3,10 @@ from datetime import datetime
 from pathlib import Path
 import queue
 import tkinter as tk
-from tkinter import filedialog, messagebox, scrolledtext, ttk
+from tkinter import filedialog, messagebox, ttk
 
 from app.constants import NAMES, STATUS
-from .theme import LINE, LOG_BG, LOG_FG, MUTED, SURFACE, TEXT
+from .theme import FOCUS, LINE, LOG_BG, LOG_FG, MUTED, SELECTION_BG, SELECTION_FG, SURFACE, TEXT
 
 
 class CrawlerRuntime:
@@ -29,7 +29,7 @@ class CrawlerRuntime:
         # 走到这里说明子进程已启动：进入 busy 态并锁定本轮快照。
         self.busy = True
         self.active_settings = settings
-        self.lock_text.set(self._lock_summary(settings))  # 顶栏显示本轮参数
+        self.lock_text.set(self._lock_summary(settings))  # 底栏显示本轮参数
         self.persist_settings(settings)                   # 落盘上次目录与功能开关
         # 禁用所有主操作按钮防止重复提交；仅解禁停止按钮。
         for button in self.buttons:
@@ -74,19 +74,26 @@ class CrawlerRuntime:
         window.configure(bg=SURFACE)
         # 关窗不销毁、只隐藏(withdraw)：保留缓冲，下次 show_logs 复用同一窗口。
         window.protocol('WM_DELETE_WINDOW', window.withdraw)
-        bar = ttk.Frame(window, padding=(22, 18))
+        bar = ttk.Frame(window, padding=(24, 16))
         bar.pack(fill='x')
-        ttk.Label(bar, text='运行日志', font=(self.ui_family, 16, 'bold')).pack(side='left')
+        ttk.Label(bar, text='运行日志', font=(self.ui_family, 18)).pack(side='left')
         ttk.Label(bar, text='本次会话', foreground=MUTED).pack(side='left', padx=(12, 0))
         ttk.Button(bar, text='保存日志', command=self.save_log).pack(side='right')
         ttk.Button(bar, text='清空', command=self.clear_log).pack(side='right', padx=8)
-        # 深色日志文本框（LOG_BG/LOG_FG），等宽字体，按词折行；建好后置 disabled 只读。
-        self.log_text = scrolledtext.ScrolledText(
-            window, bg=LOG_BG, fg=LOG_FG, insertbackground=TEXT,
-            font=(self.mono_family, 11), wrap='word', relief='flat', bd=0, padx=18, pady=16,
-            highlightthickness=1, highlightbackground=LINE, highlightcolor=LINE,
+        frame = tk.Frame(window, bg=LOG_BG, highlightthickness=1, highlightbackground=LINE)
+        frame.pack(fill='both', expand=True, padx=24, pady=(0, 24))
+        scrollbar = ttk.Scrollbar(frame)
+        scrollbar.pack(side='right', fill='y', padx=(0, 4), pady=4)
+        self.log_text = tk.Text(
+            frame, bg=LOG_BG, fg=LOG_FG, insertbackground=TEXT,
+            font=(self.mono_family, 11), wrap='word', relief='flat', bd=0, padx=16, pady=16,
+            highlightthickness=0, yscrollcommand=scrollbar.set,
+            selectbackground=SELECTION_BG, selectforeground=SELECTION_FG,
         )
-        self.log_text.pack(fill='both', expand=True, padx=22, pady=(0, 22))
+        self.log_text.pack(side='left', fill='both', expand=True)
+        self.log_text.bind('<FocusIn>', lambda _e: frame.configure(highlightbackground=FOCUS))
+        self.log_text.bind('<FocusOut>', lambda _e: frame.configure(highlightbackground=LINE))
+        scrollbar.configure(command=self.log_text.yview)
         self.log_text.insert('end', ''.join(self.logs))  # 回放本次会话已积累的全部日志
         self.log_text.configure(state='disabled')
 

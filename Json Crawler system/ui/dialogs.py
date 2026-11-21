@@ -39,9 +39,13 @@ def _parse_skip_images(text):
 
 class CrawlerDialogs:
     def show(self, index):
-        # 切页：把目标 panel 提到最上层，由导航项统一绘制选中状态。
+        # 只映射当前页，键盘 Tab 不会进入被隐藏的页面。
+        if self.current != index:
+            self.panels[self.current].grid_remove()
         self.current = index
-        self.panels[index].tkraise()
+        panel = self.panels[index]
+        if not panel.winfo_manager():
+            panel.grid(row=0, column=0, sticky='nsew')
         for i, button in self.nav.items():
             button.set_selected(i == index)
         # 进入商品页(2)时自动刷新域名文件列表，省去手点「刷新列表」。
@@ -168,7 +172,7 @@ class CrawlerDialogs:
         }
 
     def _lock_summary(self, settings):
-        # 把快照压成一行「本轮参数」文本，显示在顶栏 lock_text；空项换成中文兜底词便于阅读。
+        # 将本轮参数快照显示在任务栏；空项换成易读的默认值。
         limits = settings.get('option_limits') or {}
         pages = settings.get('max_pages') or '不限'
         proxy = PROXY_SERVER

@@ -14,25 +14,24 @@ from tkinter import BooleanVar, IntVar, StringVar, filedialog, messagebox
 from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
 
+_UTILS_PATH = str(Path(__file__).resolve().parents[1])
+if _UTILS_PATH not in sys.path:
+    sys.path.insert(0, _UTILS_PATH)
+from workbench_ui import WorkbenchNav, choose_font, MONO_FONTS, apply_workbench_controls
+
 from .constants import (
     DEFAULT_TITLE_COL, DEFAULT_PRICE_COL, DEFAULT_PARTS, SRC_ONLY_KEEP,
 )
 from .utils import strip_quotes
 from .theme import (
-    BG, SURFACE, INPUT, TEXT, MUTED, LINE, SIDE, PRIMARY,
-    PRIMARY_PRESSED, ON_ACCENT, SELECTION, SELECTED_FG, FOCUS, ERROR,
-    configure_theme,
+    SURFACE, INPUT, TEXT, MUTED, LINE, SIDE, PRIMARY,
+    SELECTION, SELECTED_FG, FOCUS, ERROR, SOFT, configure_theme,
 )
 from .features import price_check, wp_to_styles, sku_check, sku_update
 from .features import split_by_title as split_by_title_mod
 from .features import split_by_title_each as split_by_title_each_mod
 from .features import slim_src_links as slim_src_links_mod
 from .features import json_sizes
-
-_UTILS_PATH = str(Path(__file__).resolve().parents[1])
-if _UTILS_PATH not in sys.path:
-    sys.path.insert(0, _UTILS_PATH)
-from workbench_ui import GlassBackground, GlassPanel, GlassNav, apply_glass_controls
 
 TOOL_DETAILS = (
     ("WP 价格检查", "核对 WP 商品价格，定位需要关注的价格记录。", "核对商品价格"),
@@ -51,14 +50,14 @@ class SwitchToolGui:
         self.root = root
         self.root.title("商品数据转换工具")
 
-        window_width = 1280
-        window_height = 860
+        window_width = 1240
+        window_height = 820
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
         x = (screen_width - window_width) // 2
         y = (screen_height - window_height) // 2
         self.root.geometry(f"{window_width}x{window_height}+{x}+{y}")
-        self.root.minsize(1100, 760)
+        self.root.minsize(1080, 740)
 
         self.run_buttons = []
         self.tab_buttons = {}
@@ -70,48 +69,52 @@ class SwitchToolGui:
 
     def _build_ui(self):
         self.style = configure_theme(self.root)
-        apply_glass_controls(self.root)
-        self.background = GlassBackground(self.root)
-        self.background.pack(fill="both", expand=True)
-        self.background.columnconfigure(0, weight=0, minsize=224)
-        self.background.columnconfigure(1, weight=1, minsize=450)
-        self.background.columnconfigure(2, weight=0, minsize=284)
-        self.background.rowconfigure(0, weight=1)
+        self.ui_font = choose_font(self.root)
+        self.mono_font = choose_font(self.root, MONO_FONTS)
+        apply_workbench_controls(self.root)
 
-        # 纵向功能栏独立悬浮，工具、工作区和记录各有清晰层次。
-        self.sidebar = GlassPanel(self.background, padding=14, fill=SIDE, width=224)
-        self.sidebar.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=(18, 10), pady=18)
-        side = self.sidebar.body
-        tk.Label(side, text="ANGLAN  /  UTILITIES", bg=SIDE, fg=PRIMARY,
-                 font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(8, 8))
-        tk.Label(side, text="商品数据\n转换工作台", bg=SIDE, fg=TEXT, justify="left",
-                 font=("Microsoft YaHei UI", 17, "bold")).pack(anchor="w")
-        tk.Label(side, text="8 个工具 · 一个工作流", bg=SIDE, fg=MUTED,
-                 font=("Microsoft YaHei UI", 9)).pack(anchor="w", pady=(8, 18))
+        shell = ttk.Frame(self.root)
+        shell.pack(fill="both", expand=True)
+        shell.columnconfigure(2, weight=1, minsize=430)
+        shell.columnconfigure(4, weight=0, minsize=300)
+        shell.rowconfigure(0, weight=1)
+
+        side = tk.Frame(shell, bg=SIDE, width=220)
+        side.grid(row=0, column=0, sticky="ns")
+        side.pack_propagate(False)
+        tk.Frame(shell, bg=LINE, width=1).grid(row=0, column=1, sticky="ns")
+        tk.Label(side, text="Anglan", bg=SIDE, fg=TEXT,
+                 font=(self.ui_font, 18), anchor="w").pack(fill="x", padx=20, pady=(24, 0))
+        tk.Label(side, text="商品数据工具", bg=SIDE, fg=MUTED,
+                 font=(self.ui_font, 10), anchor="w").pack(fill="x", padx=20, pady=(4, 24))
+        tk.Label(side, text="工具", bg=SIDE, fg=MUTED,
+                 font=(self.ui_font, 10), anchor="w").pack(fill="x", padx=20, pady=(0, 8))
         self.tab_frame = tk.Frame(side, bg=SIDE)
-        self.tab_frame.pack(fill="x")
-        tk.Label(side, text="DATA / ORGANIZE / TRANSFORM", bg=SIDE, fg=MUTED,
-                 font=("Segoe UI", 7)).pack(side="bottom", anchor="w", pady=(12, 5))
+        self.tab_frame.pack(fill="x", padx=10)
 
-        self.work_panel = GlassPanel(self.background, padding=20, fill=SURFACE)
-        self.work_panel.grid(row=0, column=1, sticky="nsew", padx=(0, 10), pady=(18, 10))
-        workspace = self.work_panel.body
-        self.tool_number = StringVar(value="TOOL 01 / 08")
+        tk.Frame(shell, bg=LINE, width=1).grid(row=0, column=3, sticky="ns")
+        workspace = ttk.Frame(shell, padding=(24, 20))
+        workspace.grid(row=0, column=2, sticky="nsew")
+        workspace.columnconfigure(0, weight=1)
+        workspace.rowconfigure(4, weight=1)
+        self.tool_number = StringVar(value="01 / 08")
         self.tool_title = StringVar()
         self.tool_description = StringVar()
-        tk.Label(workspace, textvariable=self.tool_number, bg=SURFACE, fg=PRIMARY,
-                 font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(2, 8))
-        tk.Label(workspace, textvariable=self.tool_title, bg=SURFACE, fg=TEXT,
-                 font=("Microsoft YaHei UI", 20, "bold")).pack(anchor="w")
-        self.tool_description_label = tk.Label(
-            workspace, textvariable=self.tool_description, bg=SURFACE, fg=MUTED,
-            font=("Microsoft YaHei UI", 10), justify="left", wraplength=440,
+        ttk.Label(workspace, textvariable=self.tool_number, foreground=PRIMARY,
+                  font=(self.mono_font, 10)).grid(row=0, column=0, sticky="w", pady=(0, 8))
+        ttk.Label(workspace, textvariable=self.tool_title, style="Title.TLabel").grid(
+            row=1, column=0, sticky="w")
+        self.tool_description_label = ttk.Label(
+            workspace, textvariable=self.tool_description, foreground=MUTED,
+            justify="left", wraplength=460,
         )
-        self.tool_description_label.pack(anchor="w", fill="x", pady=(8, 18))
-        tk.Frame(workspace, bg=LINE, height=1).pack(fill="x", pady=(0, 20))
+        self.tool_description_label.grid(row=2, column=0, sticky="ew", pady=(6, 16))
+        tk.Frame(workspace, bg=LINE, height=1).grid(row=3, column=0, sticky="ew", pady=(0, 16))
 
         form_host = ttk.Frame(workspace)
-        form_host.pack(fill="both", expand=True)
+        form_host.grid(row=4, column=0, sticky="nsew")
+        form_host.columnconfigure(0, weight=1)
+        form_host.rowconfigure(0, weight=1)
         self.form_canvas = tk.Canvas(form_host, bg=SURFACE, highlightthickness=0, bd=0)
         form_scroll = ttk.Scrollbar(form_host, orient="vertical", command=self.form_canvas.yview)
         form_scroll.pack(side="right", fill="y")
@@ -123,42 +126,43 @@ class SwitchToolGui:
             scrollregion=self.form_canvas.bbox("all")))
         self.form_canvas.bind("<Configure>", self._resize_workspace)
 
-        self.log_panel = GlassPanel(self.background, padding=16, fill=SURFACE, width=284)
-        self.log_panel.grid(row=0, column=2, sticky="nsew", padx=(0, 18), pady=(18, 10))
-        log_frame = self.log_panel.body
-        log_heading = tk.Frame(log_frame, bg=SURFACE)
-        log_heading.pack(fill="x", pady=(4, 6))
-        tk.Label(log_heading, text="运行记录", bg=SURFACE, fg=TEXT,
-                 font=("Microsoft YaHei UI", 13, "bold")).pack(side="left")
-        tk.Label(log_heading, text="LIVE", bg=SURFACE, fg=PRIMARY,
-                 font=("Segoe UI", 8, "bold")).pack(side="right")
-        tk.Label(log_frame, text="当前操作的进度与输出", bg=SURFACE, fg=MUTED,
-                 font=("Microsoft YaHei UI", 9)).pack(anchor="w", pady=(0, 16))
+        log_frame = ttk.Frame(shell, padding=(16, 20))
+        log_frame.grid(row=0, column=4, sticky="nsew")
+        log_frame.rowconfigure(2, weight=1)
+        log_frame.columnconfigure(0, weight=1)
+        ttk.Label(log_frame, text="运行记录", style="Section.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(log_frame, text="任务进度和输出", foreground=MUTED).grid(
+            row=1, column=0, sticky="w", pady=(5, 12))
 
         self.log_box = ScrolledText(
             log_frame, wrap="word", width=20, height=1,
-            font=("Consolas", 10),
+            font=(self.mono_font, 10),
             bg=INPUT, fg=TEXT,
             insertbackground=TEXT,
             selectbackground=SELECTION, selectforeground=SELECTED_FG,
             highlightbackground=LINE, highlightcolor=FOCUS, highlightthickness=1,
             padx=10, pady=10, relief="flat",
         )
-        self.log_box.pack(fill="both", expand=True)
+        self.log_box.grid(row=2, column=0, sticky="nsew")
         self.log_box.frame.configure(background=INPUT)
         self.log_box.vbar.destroy()
         self.log_box.vbar = ttk.Scrollbar(self.log_box.frame, orient="vertical", command=self.log_box.yview)
         self.log_box.vbar.pack(side="right", fill="y", before=self.log_box._w)
         self.log_box.configure(yscrollcommand=self.log_box.vbar.set)
-        ttk.Button(log_frame, text="清空记录", command=self.clear_log).pack(fill="x", pady=(12, 0))
+        ttk.Button(log_frame, text="清空记录", command=self.clear_log).grid(
+            row=3, column=0, sticky="ew", pady=(12, 0))
 
-        self.status_panel = GlassPanel(self.background, padding=14, fill=SURFACE, height=70)
-        self.status_panel.grid(row=1, column=1, columnspan=2, sticky="ew", padx=(0, 18), pady=(0, 18))
-        self.status = StringVar(value="✨ 就绪")
-        tk.Label(self.status_panel.body, textvariable=self.status, bg=SURFACE, fg=PRIMARY,
-                 font=("Microsoft YaHei UI", 10, "bold")).pack(side="left")
-        tk.Label(self.status_panel.body, text="选择工具  →  配置输入  →  查看结果", bg=SURFACE,
-                 fg=MUTED, font=("Microsoft YaHei UI", 9)).pack(side="right")
+        tk.Frame(shell, bg=LINE, height=1).grid(row=1, column=0, columnspan=5, sticky="ew")
+        status_bar = ttk.Frame(shell, padding=(20, 10))
+        status_bar.grid(row=2, column=0, columnspan=5, sticky="ew")
+        status_bar.columnconfigure(1, weight=1)
+        self.status = StringVar(value="就绪")
+        self.status_dot = tk.Canvas(status_bar, width=8, height=8, bg=SURFACE,
+                                    bd=0, highlightthickness=0)
+        self.status_dot.grid(row=0, column=0, padx=(0, 8))
+        self.status_dot_item = self.status_dot.create_oval(1, 1, 7, 7, fill=MUTED, outline="")
+        ttk.Label(status_bar, textvariable=self.status).grid(row=0, column=1, sticky="w")
+        ttk.Label(status_bar, text="8 个商品数据工具").grid(row=0, column=2, sticky="e")
 
         # ── 通用工具面板 ──
         operations = [
@@ -197,13 +201,13 @@ class SwitchToolGui:
         content = ttk.Frame(f)
         content.pack(fill="x", expand=False)
 
-        ttk.Label(content, text="01  /  输入文件", font=("Microsoft YaHei UI", 10, "bold"),
+        ttk.Label(content, text="输入文件", style="Section.TLabel",
                   foreground=PRIMARY).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 12))
         ttk.Label(content, text=prompt, foreground=MUTED).grid(
             row=1, column=0, columnspan=3, sticky="w", pady=(0, 8))
 
         var = StringVar()
-        ttk.Entry(content, textvariable=var, font=("Microsoft YaHei UI", 11)).grid(
+        ttk.Entry(content, textvariable=var).grid(
             row=2, column=0, columnspan=2, sticky="ew")
 
         if allow_dir:
@@ -212,13 +216,14 @@ class SwitchToolGui:
             browse_cmd = lambda: self.browse_file(var, filetypes)
         ttk.Button(content, text="浏览文件", command=browse_cmd).grid(row=2, column=2, padx=(10, 0))
 
-        ttk.Label(content, text="02  /  执行与输出", font=("Microsoft YaHei UI", 10, "bold"),
+        ttk.Label(content, text="执行",
+                  style="Section.TLabel",
                   foreground=PRIMARY).grid(row=3, column=0, columnspan=3, sticky="w", pady=(32, 12))
-        ttk.Label(content, text="确认输入文件后开始运行。处理进度与结果路径\n将显示在右侧运行记录中。",
+        ttk.Label(content, text="确认输入后开始处理。进度与结果路径会显示在运行记录中。",
                   foreground=MUTED, justify="left").grid(
             row=4, column=0, columnspan=3, sticky="w", pady=(0, 16))
 
-        run_button = ttk.Button(content, text="▶ 运行", style="Primary.TButton",
+        run_button = ttk.Button(content, text="运行", style="Primary.TButton",
                                 command=lambda: self.run_operation(internal_name, func, var.get()))
         run_button.grid(row=5, column=0, columnspan=3, sticky="ew")
         self.run_buttons.append(run_button)
@@ -243,13 +248,13 @@ class SwitchToolGui:
         content.pack(fill="x", expand=False)
         content.columnconfigure(1, weight=1)
 
-        ttk.Label(content, text="目标:", font=("Microsoft YaHei UI", 11, "bold")).grid(
-            row=1, column=0, sticky="e", padx=(0, 10), pady=6)
-        ttk.Entry(content, textvariable=self.split_path_var, font=("Microsoft YaHei UI", 11)).grid(
+        ttk.Label(content, text="输入文件或目录").grid(
+            row=1, column=0, sticky="w", padx=(0, 12), pady=6)
+        ttk.Entry(content, textvariable=self.split_path_var).grid(
             row=1, column=1, sticky="ew", pady=6)
-        ttk.Button(content, text="📂 浏览",
+        ttk.Button(content, text="选择目录或文件",
                    command=lambda: self._browse_dir(self.split_path_var)).grid(
-            row=1, column=2, padx=(15, 0), pady=6)
+            row=1, column=2, padx=(12, 0), pady=6)
 
         param_row = ttk.Frame(content)
         param_row.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(6, 0))
@@ -269,7 +274,7 @@ class SwitchToolGui:
                         variable=self.split_overwrite_var).grid(
             row=3, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
-        run_button = ttk.Button(content, text="🚀 开始拆分", style="Primary.TButton", command=self._run_split)
+        run_button = ttk.Button(content, text="开始拆分", style="Primary.TButton", command=self._run_split)
         run_button.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(15, 0))
         self.run_buttons.append(run_button)
 
@@ -354,25 +359,25 @@ class SwitchToolGui:
         content.pack(fill="x", expand=False)
         content.columnconfigure(1, weight=1)
 
-        ttk.Label(content, text="目标:", font=("Microsoft YaHei UI", 11, "bold")).grid(
-            row=1, column=0, sticky="e", padx=(0, 10), pady=6)
-        ttk.Entry(content, textvariable=self.split_each_path_var, font=("Microsoft YaHei UI", 11)).grid(
+        ttk.Label(content, text="输入文件或目录").grid(
+            row=1, column=0, sticky="w", padx=(0, 12), pady=6)
+        ttk.Entry(content, textvariable=self.split_each_path_var).grid(
             row=1, column=1, sticky="ew", pady=6)
-        ttk.Button(content, text="📂 浏览",
+        ttk.Button(content, text="选择目录或文件",
                    command=lambda: self._browse_dir(self.split_each_path_var)).grid(
-            row=1, column=2, padx=(15, 0), pady=6)
+            row=1, column=2, padx=(12, 0), pady=6)
 
         param_row = ttk.Frame(content)
         param_row.grid(row=2, column=0, columnspan=3, sticky="w", pady=(6, 0))
 
-        ttk.Label(param_row, text="分组列:", font=("Microsoft YaHei UI", 11, "bold")).pack(side="left")
+        ttk.Label(param_row, text="分组列").pack(side="left")
         ttk.Entry(param_row, textvariable=self.split_each_title_var, width=12).pack(side="left", padx=(4, 15))
 
         ttk.Checkbutton(content, text="覆盖同名文件（不勾选则按「_新、_新2…」另存）",
                         variable=self.split_each_overwrite_var).grid(
             row=3, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
-        run_button = ttk.Button(content, text="🚀 开始切分", style="Primary.TButton", command=self._run_split_each)
+        run_button = ttk.Button(content, text="开始切分", style="Primary.TButton", command=self._run_split_each)
         run_button.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(15, 0))
         self.run_buttons.append(run_button)
 
@@ -451,26 +456,25 @@ class SwitchToolGui:
         ttk.Label(
             content,
             text=("按 styles1 精简 src_links 列：\n"
-                  "  · 已被 styles1 引用的图片 → 全部保留\n"
-                  "  · styles1 未引用的图片 → 只保留开头若干张，其余删除\n"
+                  "已被 styles1 引用的图片会全部保留。未引用的图片只保留开头指定张数。\n"
                   "精简结果写回源文件的 src_links 列。"),
             font=("Microsoft YaHei UI", 10),
             foreground=MUTED, wraplength=480,
             justify="left",
         ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 15))
 
-        ttk.Label(content, text="目标:", font=("Microsoft YaHei UI", 11, "bold")).grid(
-            row=1, column=0, sticky="e", padx=(0, 10), pady=6)
-        ttk.Entry(content, textvariable=self.slim_path_var, font=("Microsoft YaHei UI", 11)).grid(
+        ttk.Label(content, text="输入文件或目录").grid(
+            row=1, column=0, sticky="w", padx=(0, 12), pady=6)
+        ttk.Entry(content, textvariable=self.slim_path_var).grid(
             row=1, column=1, sticky="ew", pady=6)
-        ttk.Button(content, text="📂 浏览",
+        ttk.Button(content, text="选择目录或文件",
                    command=lambda: self._browse_dir(self.slim_path_var)).grid(
-            row=1, column=2, padx=(15, 0), pady=6)
+            row=1, column=2, padx=(12, 0), pady=6)
 
         param_row = ttk.Frame(content)
         param_row.grid(row=2, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
-        ttk.Label(param_row, text="未引用图片保留张数:", font=("Microsoft YaHei UI", 11, "bold")).pack(side="left")
+        ttk.Label(param_row, text="未引用图片保留张数").pack(side="left")
         ttk.Spinbox(param_row, from_=0, to=99, width=5, textvariable=self.slim_keep_var).pack(
             side="left", padx=(6, 0))
 
@@ -478,7 +482,7 @@ class SwitchToolGui:
                         variable=self.slim_overwrite_var).grid(
             row=3, column=0, columnspan=3, sticky="w", pady=(10, 0))
 
-        run_button = ttk.Button(content, text="🚀 开始精简", style="Primary.TButton", command=self._run_src_slim)
+        run_button = ttk.Button(content, text="开始精简", style="Primary.TButton", command=self._run_src_slim)
         run_button.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(15, 0))
         self.run_buttons.append(run_button)
 
@@ -534,8 +538,8 @@ class SwitchToolGui:
         self.size_backup_var = BooleanVar(value=True)
         self.size_adaptive_var = BooleanVar(value=False)
 
-        ttk.Label(content, text="01  /  输入商品 JSON", foreground=PRIMARY,
-                  font=("Microsoft YaHei UI", 10, "bold")).grid(
+        ttk.Label(content, text="商品 JSON", foreground=PRIMARY,
+                  style="Section.TLabel").grid(
             row=0, column=0, columnspan=3, sticky="w", pady=(0, 10))
         ttk.Entry(content, textvariable=self.size_path_var).grid(
             row=1, column=0, columnspan=3, sticky="ew")
@@ -546,8 +550,8 @@ class SwitchToolGui:
         )).pack(side="left")
         ttk.Button(browse, text="选择目录", command=self._browse_size_dir).pack(side="left", padx=(4, 0))
 
-        ttk.Label(content, text="02  /  尺码规则", foreground=PRIMARY,
-                  font=("Microsoft YaHei UI", 10, "bold")).grid(
+        ttk.Label(content, text="尺码规则", foreground=PRIMARY,
+                  style="Section.TLabel").grid(
             row=3, column=0, columnspan=3, sticky="w", pady=(24, 10))
         presets = ttk.Frame(content)
         presets.grid(row=4, column=0, columnspan=3, sticky="w", pady=(0, 10))
@@ -708,9 +712,9 @@ class SwitchToolGui:
 
     def _create_nav_button(self, idx, internal_name, display_text):
         """保留原有索引与名称，以紧凑纵向导航展示八个工具。"""
-        btn = GlassNav(
-            self.tab_frame, idx + 1, display_text, TOOL_DETAILS[idx][2],
-            command=lambda n=internal_name: self.select_tab(n), width=180, height=54,
+        btn = WorkbenchNav(
+            self.tab_frame, idx + 1, display_text, hint="",
+            command=lambda n=internal_name: self.select_tab(n), width=198,
         )
         btn.pack(fill="x", pady=(0, 4))
         self.tab_buttons[internal_name] = btn
@@ -727,7 +731,7 @@ class SwitchToolGui:
             else:
                 self.frames[n].pack_forget()
         index = list(self.tab_buttons).index(name)
-        self.tool_number.set(f"TOOL {index + 1:02d} / 08")
+        self.tool_number.set(f"{index + 1:02d} / 08")
         self.tool_title.set(TOOL_DETAILS[index][0])
         self.tool_description.set(TOOL_DETAILS[index][1])
         self.form_canvas.yview_moveto(0)
@@ -777,7 +781,8 @@ class SwitchToolGui:
             button.configure(state=state)
         if hasattr(self, "size_apply_button"):
             self._update_size_apply_state()
-        self.status.set("⏳ 运行中..." if running else "✨ 就绪")
+        self.status.set("运行中" if running else "就绪")
+        self.status_dot.itemconfigure(self.status_dot_item, fill=PRIMARY if running else MUTED)
 
     def run_operation(self, name, func, input_file):
         input_file = strip_quotes(input_file)

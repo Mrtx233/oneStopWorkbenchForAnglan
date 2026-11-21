@@ -10,7 +10,10 @@ from urllib.parse import urlparse
 UTILS_DIR = Path(__file__).resolve().parents[1]
 if str(UTILS_DIR) not in sys.path:
     sys.path.insert(0, str(UTILS_DIR))
-from workbench_ui import GlassBackground, GlassPanel, GlassNav, apply_glass_controls
+from workbench_ui import (
+    BG, FOCUS, HOVER, INPUT, LINE, MUTED, SELECTION, SELECTION_FG, SIDE, SOFT, SURFACE,
+    TEXT, WorkbenchNav, apply_workbench_controls,
+)
 from jsonl_store import load_records as load_jsonl_records, save_records as save_jsonl_records
 
 
@@ -18,49 +21,43 @@ JSONL_PATH = Path(__file__).parent / "links.jsonl"
 
 
 # ============================================================
-# 固定曜石黑金主题；所有控件共用语义色，状态由文字与符号辅助表达。
+# 使用工作台色板，审核状态另有语义色。
 # ============================================================
 
 C = {
-    "bg": "#14161a",
-    "sidebar": "#1d1f24",
-    "sidebar_hover": "#323033",
-    "card": "#24262b",
-    "input": "#1a1c20",
-    "soft": "#292a2d",
-    "line": "#595248",
-    "text": "#eeeae2",
-    "sub": "#c9c3b7",
-    "muted": "#aaa59a",
-    "primary": "#d1b06f",
-    "primary_hover": "#e2c58a",
-    "primary_soft": "#433a29",
-    "on_accent": "#191711",
-    "selected_text": "#efcf90",
-    "row_alt": "#292b30",
-    "focus": "#edca80",
-    "signal_neutral": "#c9c3b7",
-    "signal_progress": "#86c6d3",
-    "signal_good": "#83c6a4",
-    "signal_warn": "#e2bd77",
-    "signal_alert": "#ee9a92",
-    "signal_soft": "#2d2e32",
+    "bg": BG,
+    "sidebar": SIDE,
+    "sidebar_hover": HOVER,
+    "card": SURFACE,
+    "input": INPUT,
+    "soft": SOFT,
+    "line": LINE,
+    "text": TEXT,
+    "sub": "#cdcfd1",
+    "muted": MUTED,
+    "primary_soft": SELECTION,
+    "selected_text": SELECTION_FG,
+    "focus": FOCUS,
+    "signal_neutral": "#cdcfd1",
+    "signal_progress": "#a0bdcb",
+    "signal_good": "#9fc4ac",
+    "signal_warn": "#d2b987",
+    "signal_alert": "#dca39b",
+    "signal_soft": SOFT,
 }
 
 
 # 只用系统字体族；层级靠字号与字重，桌面最小 10pt。
-FONT = "Microsoft YaHei UI"
+FONT = {"darwin": "PingFang SC", "win32": "Microsoft YaHei UI"}.get(sys.platform, "Noto Sans CJK SC")
 
 FONT_BODY = (FONT, 11)
 FONT_SMALL = (FONT, 10)
 FONT_CAPTION = (FONT, 10)
-FONT_TITLE = (FONT, 20, "bold")
+FONT_TITLE = (FONT, 24)
 FONT_SECTION = (FONT, 12, "bold")
 FONT_LABEL = (FONT, 10, "bold")
 FONT_HEADING = (FONT, 10, "bold")
-FONT_ICON = (FONT, 13)
-FONT_BRAND = (FONT, 13, "bold")
-FONT_MONO = ("Consolas", 11)
+FONT_MONO = ({"darwin": "Menlo", "win32": "Consolas"}.get(sys.platform, "DejaVu Sans Mono"), 11)
 
 
 STATUS_NEW = "未使用"
@@ -78,8 +75,7 @@ STATUS_PRESETS = [
 ]
 
 
-# 颜色只表达「大类」，具体含义由文字承载：一个颜色一个意思。
-# 形状符号让状态不只靠颜色传达。
+# 记录详情用色区分审核状态，具体含义由文字承载。
 STATUS_ROLE = {
     "未使用": "neutral",
     "历史，不在启用": "neutral",
@@ -98,11 +94,11 @@ STATUS_ROLE = {
 }
 
 ROLE_STYLE = {
-    "neutral": ("○", "signal_neutral", "signal_soft"),
-    "progress": ("◐", "signal_progress", "signal_soft"),
-    "good": ("●", "signal_good", "signal_soft"),
-    "warn": ("△", "signal_warn", "signal_soft"),
-    "alert": ("!", "signal_alert", "signal_soft"),
+    "neutral": "signal_neutral",
+    "progress": "signal_progress",
+    "good": "signal_good",
+    "warn": "signal_warn",
+    "alert": "signal_alert",
 }
 
 
@@ -110,16 +106,12 @@ def status_role(status):
     return STATUS_ROLE.get(status, "neutral")
 
 
-def status_glyph(status):
-    return ROLE_STYLE[status_role(status)][0]
-
-
 def status_fg(status):
-    return C[ROLE_STYLE[status_role(status)][1]]
+    return C[ROLE_STYLE[status_role(status)]]
 
 
 def status_bg(status):
-    return C[ROLE_STYLE[status_role(status)][2]]
+    return C["signal_soft"]
 
 
 # 保留给外部读取，与固定主题保持一致。
@@ -230,156 +222,22 @@ class LinkBrowserApp:
     # ========================================================
 
     def _setup_styles(self):
-
-        style = ttk.Style()
-
-        try:
-            style.theme_use("clam")
-        except tk.TclError:
-            pass
-
-        # Combobox 弹出的 Listbox 不继承 ttk 样式，需要单独设置。
-        for option, value in {
-            "background": C["input"],
-            "foreground": C["text"],
-            "selectBackground": C["primary_soft"],
-            "selectForeground": C["selected_text"],
-            "highlightBackground": C["line"],
-            "highlightColor": C["focus"],
-            "borderWidth": 0,
-            "relief": "flat",
-            "font": FONT_BODY,
-        }.items():
-            self.root.option_add(f"*TCombobox*Listbox.{option}", value)
-
-        # 表格：安静的行、清晰的表头，选中行用强调色标出当前位置
+        style = apply_workbench_controls(self.root)
         style.configure(
-            "Modern.Treeview",
-            background=C["card"],
-            foreground=C["text"],
-            fieldbackground=C["card"],
-            bordercolor=C["card"],
-            lightcolor=C["card"],
-            darkcolor=C["card"],
-            borderwidth=0,
-            relief="flat",
-            rowheight=34,
-            font=FONT_BODY,
+            "Modern.Treeview", background=C["input"], foreground=C["text"],
+            fieldbackground=C["input"], bordercolor=C["input"], lightcolor=C["input"],
+            darkcolor=C["input"], borderwidth=0, relief="flat", rowheight=32, font=FONT_BODY,
         )
-
         style.configure(
-            "Modern.Treeview.Heading",
-            background=C["soft"],
-            foreground=C["sub"],
-            bordercolor=C["soft"],
-            lightcolor=C["soft"],
-            darkcolor=C["soft"],
-            borderwidth=0,
-            relief="flat",
-            font=FONT_HEADING,
-            padding=(12, 10),
+            "Modern.Treeview.Heading", background=C["soft"], foreground=C["sub"],
+            bordercolor=C["soft"], lightcolor=C["soft"], darkcolor=C["soft"],
+            borderwidth=0, relief="flat", font=FONT_HEADING, padding=(12, 8),
         )
-
-        style.map(
-            "Modern.Treeview.Heading",
-            background=[
-                ("active", C["sidebar_hover"])
-            ],
-        )
-
-        style.map(
-            "Modern.Treeview",
-            background=[
-                ("selected", C["primary_soft"])
-            ],
-            foreground=[
-                ("selected", C["selected_text"])
-            ],
-        )
-
-        # 输入类控件：静态细边，聚焦时边框变强调色（键盘可达的可见反馈）
-        for name in (
-            "Modern.TEntry",
-            "Modern.TCombobox",
-            "Hint.TEntry",
-        ):
-            foreground = C["muted"] if name == "Hint.TEntry" else C["text"]
-            style.configure(
-                name,
-                fieldbackground=C["input"],
-                background=C["input"],
-                foreground=foreground,
-                arrowcolor=C["primary"],
-                bordercolor=C["line"],
-                lightcolor=C["line"],
-                darkcolor=C["line"],
-                insertcolor=C["text"],
-                selectbackground=C["primary_soft"],
-                selectforeground=C["selected_text"],
-                relief="flat",
-                padding=8,
-            )
-
-            style.map(
-                name,
-                bordercolor=[
-                    ("disabled", C["line"]),
-                    ("focus", C["focus"])
-                ],
-                lightcolor=[
-                    ("disabled", C["line"]),
-                    ("focus", C["focus"])
-                ],
-                darkcolor=[
-                    ("disabled", C["line"]),
-                    ("focus", C["focus"])
-                ],
-                fieldbackground=[
-                    ("disabled", C["soft"]),
-                    ("readonly", C["input"]),
-                ],
-                background=[
-                    ("disabled", C["soft"]),
-                    ("active", C["primary_soft"]),
-                    ("readonly", C["input"]),
-                ],
-                foreground=[
-                    ("disabled", C["muted"]),
-                    ("readonly", foreground),
-                ],
-                arrowcolor=[
-                    ("disabled", C["muted"]),
-                    ("active", C["selected_text"]),
-                ],
-            )
-
-        style.configure(
-            "Vertical.TScrollbar",
-            background=C["sidebar_hover"],
-            troughcolor=C["card"],
-            bordercolor=C["card"],
-            lightcolor=C["sidebar_hover"],
-            darkcolor=C["sidebar_hover"],
-            arrowcolor=C["sub"],
-            relief="flat",
-        )
-
-        style.map(
-            "Vertical.TScrollbar",
-            background=[
-                ("disabled", C["soft"]),
-                ("pressed", C["primary"]),
-                ("active", C["primary_soft"]),
-            ],
-            arrowcolor=[("active", C["selected_text"])],
-        )
-        apply_glass_controls(self.root)
-        for name in ("Modern.TEntry", "Hint.TEntry"):
-            style.configure(name, background=C["card"], padding=(10, 7))
-            style.map(name, background=[("disabled", C["card"]),
-                                        ("readonly", C["card"]),
-                                        ("focus", C["card"]),
-                                        ("active", C["card"])])
+        style.map("Modern.Treeview.Heading", background=[("active", C["sidebar_hover"])])
+        style.map("Modern.Treeview", background=[("selected", C["primary_soft"])],
+                  foreground=[("selected", C["selected_text"])])
+        style.configure("Hint.TEntry", foreground=C["muted"])
+        self.root.option_add("*TCombobox*Listbox.font", FONT_BODY)
 
     # ========================================================
     # Field hints
@@ -453,37 +311,34 @@ class LinkBrowserApp:
         return ttk.Button(parent, text=text, command=command, style=style,
                           padding=(padx, pady), width=0, cursor="hand2", takefocus=True)
 
-    def card(self, parent):
-
-        return tk.Frame(
-            parent,
-            bg=C["card"],
-            highlightthickness=1,
-            highlightbackground=C["line"],
-        )
-
     # ========================================================
     # Shell
     # ========================================================
 
     def _build_app(self):
-        self.background = GlassBackground(self.root)
-        self.background.pack(fill=tk.BOTH, expand=True)
-        self.main = self.background
-        self.main.columnconfigure(1, weight=1)
-        self.main.rowconfigure(1, weight=1)
-        self.sidebar_panel = GlassPanel(self.main, padding=10, fill=C["sidebar"], width=190)
-        self.sidebar_panel.grid(row=0, column=0, rowspan=3, sticky="nsew",
-                                padx=(16, 10), pady=16)
-        self.sidebar = self.sidebar_panel.body
+        shell = tk.Frame(self.root, bg=C["bg"])
+        shell.pack(fill=tk.BOTH, expand=True)
+        shell.rowconfigure(0, weight=1)
+        shell.columnconfigure(2, weight=1)
+        self.sidebar = tk.Frame(shell, bg=C["sidebar"], width=168)
+        self.sidebar.grid(row=0, column=0, sticky="ns")
+        self.sidebar.pack_propagate(False)
+        tk.Frame(shell, bg=C["line"], width=1).grid(row=0, column=1, sticky="ns")
         self._build_sidebar()
+
+        self.main = tk.Frame(shell, bg=C["card"])
+        self.main.grid(row=0, column=2, sticky="nsew")
+        self.main.columnconfigure(0, weight=1)
+        self.main.rowconfigure(2, weight=1)
         self._build_header()
-        self.page_host = tk.Frame(self.main, bg=C["bg"])
-        self.page_host.grid(row=1, column=1, sticky="nsew", padx=(0, 16))
-        self.library_page = tk.Frame(self.page_host, bg=C["bg"])
-        self.add_page = tk.Frame(self.page_host, bg=C["bg"])
+        tk.Frame(self.main, bg=C["line"], height=1).grid(row=1, column=0, sticky="ew")
+        self.page_host = tk.Frame(self.main, bg=C["card"])
+        self.page_host.grid(row=2, column=0, sticky="nsew")
+        self.library_page = tk.Frame(self.page_host, bg=C["card"])
+        self.add_page = tk.Frame(self.page_host, bg=C["card"])
         self._build_library_page()
         self._build_add_page()
+        tk.Frame(self.main, bg=C["line"], height=1).grid(row=3, column=0, sticky="ew")
         self._build_statusbar()
 
     # ========================================================
@@ -491,39 +346,21 @@ class LinkBrowserApp:
     # ========================================================
 
     def _build_sidebar(self):
-        brand = tk.Frame(self.sidebar, bg=C["sidebar"])
-        brand.pack(fill=tk.X, padx=6, pady=(14, 24))
-        tk.Label(brand, text="L /", bg=C["sidebar"], fg=C["primary"],
-                 font=("Segoe UI", 25, "bold")).pack(anchor="w")
-        tk.Label(brand, text="链接库", bg=C["sidebar"], fg=C["text"],
-                 font=(FONT, 17, "bold")).pack(anchor="w", pady=(6, 3))
-        tk.Label(brand, text="LINK ARCHIVE", bg=C["sidebar"], fg=C["muted"],
-                 font=("Segoe UI", 9)).pack(anchor="w")
-        tk.Frame(self.sidebar, bg=C["line"], height=1).pack(fill=tk.X, padx=6, pady=(0, 16))
+        tk.Label(self.sidebar, text="链接库", bg=C["sidebar"], fg=C["text"],
+                 font=(FONT, 18)).pack(anchor="w", padx=20, pady=(24, 24))
         self.nav_buttons = {
-            "library": self._create_nav("library", "01", "浏览链接"),
-            "add": self._create_nav("add", "02", "新增链接"),
+            "library": self._create_nav("library", 1, "浏览链接"),
+            "add": self._create_nav("add", 2, "新增链接"),
         }
-        tk.Frame(self.sidebar, bg=C["sidebar"]).pack(fill=tk.BOTH, expand=True)
-        footer = tk.Frame(self.sidebar, bg=C["sidebar"])
-        footer.pack(fill=tk.X, padx=6, pady=(18, 12))
-        tk.Label(footer, text="本地链接档案", bg=C["sidebar"], fg=C["sub"],
-                 font=FONT_LABEL).pack(anchor="w")
-        self.sidebar_count = tk.Label(footer, text="", bg=C["sidebar"],
-                                      fg=C["primary"], font=FONT_CAPTION)
-        self.sidebar_count.pack(anchor="w", pady=(6, 0))
+        self.sidebar_count = tk.Label(self.sidebar, bg=C["sidebar"], fg=C["muted"], font=FONT_CAPTION)
+        self.sidebar_count.pack(side=tk.BOTTOM, anchor="w", padx=20, pady=16)
         self._update_sidebar_count()
 
-    def _create_nav(self, key, icon, title):
-        hint = "批次 / 分类 / 审核" if key == "library" else "批量导入 / 自动归档"
-        nav = GlassNav(self.sidebar, index=icon, title=title, hint=hint,
-                       command=lambda: self.switch_page(key), width=160)
-        nav.pack(fill=tk.X, pady=4)
+    def _create_nav(self, key, index, title):
+        nav = WorkbenchNav(self.sidebar, index=index, title=title,
+                           command=lambda: self.switch_page(key), width=144)
+        nav.pack(fill=tk.X, padx=12, pady=(0, 4))
         return nav
-
-    def _hover_nav(self, box, entering):
-        # 指针与键盘反馈由公共导航组件统一绘制。
-        return
 
     def _set_active_nav(self, key):
         for nav_key, nav in self.nav_buttons.items():
@@ -534,18 +371,14 @@ class LinkBrowserApp:
     # ========================================================
 
     def _build_header(self):
-        self.header_panel = GlassPanel(self.main, padding=14, fill=C["card"], height=112)
-        self.header_panel.grid(row=0, column=1, sticky="ew", padx=(0, 16), pady=(16, 10))
-        header = self.header_panel.body
+        header = tk.Frame(self.main, bg=C["card"])
+        header.grid(row=0, column=0, sticky="ew", padx=24, pady=16)
         header.columnconfigure(0, weight=1)
-        self.page_title = tk.Label(header, text="链接库", bg=C["card"],
-                                    fg=C["text"], font=(FONT, 19, "bold"), anchor="w")
+        self.page_title = tk.Label(header, bg=C["card"], fg=C["text"], font=FONT_TITLE, anchor="w")
         self.page_title.grid(row=0, column=0, sticky="w")
-        self.page_subtitle = tk.Label(header, text="按批次与分类浏览，集中整理链接审核进度。",
-                                       bg=C["card"], fg=C["muted"], font=FONT_SMALL, anchor="w")
+        self.page_subtitle = tk.Label(header, bg=C["card"], fg=C["muted"], font=FONT_SMALL, anchor="w")
         self.page_subtitle.grid(row=1, column=0, sticky="w", pady=(4, 0))
-        self.header_action = self.button(header, "＋ 录入链接", lambda: self.switch_page("add"),
-                                          kind="primary", padx=14, pady=7, font=FONT_SMALL)
+        self.header_action = self.button(header, "新增链接", lambda: self.switch_page("add"), kind="primary")
         self.header_action.grid(row=0, column=1, rowspan=2, sticky="e", padx=(12, 0))
 
     # ========================================================
@@ -553,12 +386,10 @@ class LinkBrowserApp:
     # ========================================================
 
     def _build_statusbar(self):
-        bar = tk.Frame(self.main, bg=C["bg"])
-        bar.grid(row=2, column=1, sticky="ew", padx=(8, 24), pady=(7, 12))
-        self.statusbar = tk.Label(bar, text="就绪", bg=C["bg"], fg=C["muted"], font=FONT_CAPTION)
+        bar = tk.Frame(self.main, bg=C["card"])
+        bar.grid(row=4, column=0, sticky="ew", padx=24, pady=12)
+        self.statusbar = tk.Label(bar, text="就绪", bg=C["card"], fg=C["muted"], font=FONT_CAPTION)
         self.statusbar.pack(side=tk.LEFT)
-        tk.Label(bar, text="JSONL  /  本地档案", bg=C["bg"], fg=C["muted"],
-                 font=("Segoe UI", 9)).pack(side=tk.RIGHT)
 
     # ========================================================
     # Switch page
@@ -567,17 +398,17 @@ class LinkBrowserApp:
     def switch_page(self, page):
         self.current_page = page
         self._set_active_nav(page)
-        self.library_page.pack_forget()
-        self.add_page.pack_forget()
         if page == "library":
-            self.page_title.config(text="链接库")
-            self.page_subtitle.config(text="按批次与分类浏览，集中整理链接审核进度。")
-            self.header_action.config(text="＋ 录入链接", command=lambda: self.switch_page("add"))
+            self.add_page.pack_forget()
+            self.page_title.config(text="浏览链接")
+            self.page_subtitle.config(text="按批次和分类查看链接，记录审核状态与备注")
+            self.header_action.config(text="新增链接", style="Primary.TButton", command=lambda: self.switch_page("add"))
             self.library_page.pack(fill=tk.BOTH, expand=True)
         else:
+            self.library_page.pack_forget()
             self.page_title.config(text="新增链接")
-            self.page_subtitle.config(text="粘贴多条链接与分类，将新记录归入同一批次。")
-            self.header_action.config(text="← 返回链接库", command=lambda: self.switch_page("library"))
+            self.page_subtitle.config(text="每行填写链接和分类，保存时自动编号")
+            self.header_action.config(text="返回链接库", style="TButton", command=lambda: self.switch_page("library"))
             self.add_page.pack(fill=tk.BOTH, expand=True)
 
     # ========================================================
@@ -587,12 +418,14 @@ class LinkBrowserApp:
     def _build_library_page(self):
         self.library_page.columnconfigure(0, weight=1)
         self.library_page.rowconfigure(0, weight=1)
-        self.table_panel = GlassPanel(self.library_page, padding=6, fill=C["card"])
-        self.table_panel.grid(row=0, column=0, sticky="nsew")
-        self.detail_panel = GlassPanel(self.library_page, padding=6, fill=C["card"], width=210)
-        self.detail_panel.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
-        self._build_table(self.table_panel.body)
-        self._build_detail(self.detail_panel.body)
+        table_panel = tk.Frame(self.library_page, bg=C["card"])
+        table_panel.grid(row=0, column=0, sticky="nsew", padx=(24, 16), pady=16)
+        tk.Frame(self.library_page, bg=C["line"], width=1).grid(row=0, column=1, sticky="ns")
+        detail_panel = tk.Frame(self.library_page, bg=C["card"], width=216)
+        detail_panel.grid(row=0, column=2, sticky="ns", padx=16, pady=16)
+        detail_panel.pack_propagate(False)
+        self._build_table(table_panel)
+        self._build_detail(detail_panel)
 
     # ========================================================
     # Table
@@ -608,16 +441,15 @@ class LinkBrowserApp:
 
         top.pack(
             fill=tk.X,
-            padx=16,
-            pady=(14, 10),
+            pady=(0, 12),
         )
 
         self.back_btn = self.button(
             top,
-            "←",
+            "返回上一级",
             self.go_back,
-            padx=10,
-            pady=5,
+            padx=12,
+            pady=4,
         )
 
         self.back_btn.pack(
@@ -662,8 +494,7 @@ class LinkBrowserApp:
 
         tools.pack(
             fill=tk.X,
-            padx=16,
-            pady=(0, 10),
+            pady=(0, 12),
         )
 
         search_box = tk.Frame(
@@ -718,6 +549,8 @@ class LinkBrowserApp:
             expand=True,
             ipady=8,
         )
+        self.search_entry.bind("<FocusIn>", lambda e: search_box.config(highlightbackground=C["focus"]))
+        self.search_entry.bind("<FocusOut>", lambda e: search_box.config(highlightbackground=C["line"]))
 
         self.search_entry.bind(
             "<KeyRelease>",
@@ -742,7 +575,7 @@ class LinkBrowserApp:
 
         self.filter_combo.pack(
             side=tk.LEFT,
-            padx=(10, 0),
+            padx=(8, 0),
         )
 
         self.filter_combo.bind(
@@ -753,14 +586,14 @@ class LinkBrowserApp:
         # Treeview
         tree_frame = tk.Frame(
             parent,
-
-            bg=C["card"],
+            bg=C["input"],
+            highlightthickness=1,
+            highlightbackground=C["line"],
         )
 
         tree_frame.pack(
             fill=tk.BOTH,
             expand=True,
-            padx=16,
             pady=(0, 12),
         )
 
@@ -854,37 +687,37 @@ class LinkBrowserApp:
             "<Configure>",
             self._resize_columns,
         )
+        self.listbox.bind("<FocusIn>", lambda e: tree_frame.config(highlightbackground=C["focus"]))
+        self.listbox.bind("<FocusOut>", lambda e: tree_frame.config(highlightbackground=C["line"]))
 
         # Batch action
         actions = tk.Frame(
             parent,
-            bg=C["soft"],
+            bg=C["card"],
         )
 
         actions.pack(
             side=tk.BOTTOM,
             fill=tk.X,
-            padx=16,
-            pady=(0, 14),
             before=tree_frame,
         )
+        tk.Frame(actions, bg=C["line"], height=1).pack(fill=tk.X, pady=(0, 8))
 
         top_action = tk.Frame(
             actions,
-            bg=C["soft"],
+            bg=C["card"],
         )
 
         top_action.pack(
             fill=tk.X,
-            padx=12,
-            pady=(8, 6),
+            pady=(0, 4),
         )
 
         tk.Label(
             top_action,
             text="批量操作",
 
-            bg=C["soft"],
+            bg=C["card"],
             fg=C["sub"],
 
             font=FONT_LABEL,
@@ -896,7 +729,7 @@ class LinkBrowserApp:
             top_action,
             text="未选择",
 
-            bg=C["soft"],
+            bg=C["card"],
             fg=C["muted"],
 
             font=FONT_CAPTION,
@@ -910,36 +743,22 @@ class LinkBrowserApp:
         # Status buttons（自动换行：窗口变窄时按钮流式折行，不再被遮挡）
         self.status_row = tk.Frame(
             actions,
-            bg=C["soft"],
+            bg=C["card"],
         )
 
         status_row = self.status_row
 
         status_row.pack(
             fill=tk.X,
-            padx=12,
-            pady=(0, 6),
+            pady=(0, 4),
         )
 
         self._status_buttons = []
 
         for status in STATUS_PRESETS:
-            role = status_role(status)
-            style_name = f"Status{role}.TButton"
-            style = ttk.Style(self.root)
-            style.configure(style_name, foreground=status_fg(status), font=FONT_SMALL,
-                            padding=(8, 5), background=C["soft"])
-            style.map(style_name, foreground=[("disabled", C["muted"]),
-                                              ("active", C["selected_text"]),
-                                              ("!disabled", status_fg(status))],
-                       background=[("disabled", C["soft"]), ("active", C["soft"]),
-                                   ("pressed", C["soft"])])
-            btn = ttk.Button(status_row, text=f"{status_glyph(status)} {status}",
-                             command=lambda s=status: self.set_selected_status(s),
-                             style=style_name, width=0, cursor="hand2", takefocus=True)
+            btn = self.button(status_row, status, lambda s=status: self.set_selected_status(s),
+                              padx=8, pady=4, font=FONT_SMALL)
             self._status_buttons.append(btn)
-
-        self._status_widgets = self._status_buttons
 
         status_row.bind(
             "<Configure>",
@@ -965,11 +784,8 @@ class LinkBrowserApp:
         if row_width < 40:
             return
 
-        gap = 5
-        widgets = self._status_widgets
-
-        for widget in widgets:
-            widget.update_idletasks()
+        gap = 4
+        widgets = self._status_buttons
 
         widths = [
             widget.winfo_reqwidth()
@@ -982,7 +798,7 @@ class LinkBrowserApp:
                 for widget in widgets
             ),
             default=0,
-        ) + 6
+        ) + gap
 
         x = 0
         row = 0
@@ -995,7 +811,7 @@ class LinkBrowserApp:
 
             widget.place(
                 x=x,
-                y=row * row_height + 3,
+                y=row * row_height,
             )
 
             x += w + gap
@@ -1005,32 +821,30 @@ class LinkBrowserApp:
             height=(row + 1) * row_height
         )
 
-        self.status_row.pack_propagate(False)
-
     # ========================================================
     # Note row（归属 _build_actions）
     # ========================================================
 
     def _build_note_row(self, actions):
-        note_row = tk.Frame(actions, bg=C["soft"])
-        note_row.pack(fill=tk.X, padx=10, pady=(2, 9))
+        note_row = tk.Frame(actions, bg=C["card"])
+        note_row.pack(fill=tk.X, pady=(4, 0))
         note_row.columnconfigure(0, weight=1, uniform="fields")
         note_row.columnconfigure(2, weight=1, uniform="fields")
         self.custom_status_entry = ttk.Entry(note_row, style="Modern.TEntry", width=10, font=FONT_SMALL)
         self.custom_status_entry.grid(row=0, column=0, sticky="ew")
         self.custom_status_entry.bind("<Return>", lambda e: self.set_custom_status())
-        self.button(note_row, "应用状态", self.set_custom_status, kind="primary",
-                    padx=8, pady=5, font=FONT_SMALL).grid(row=0, column=1, padx=(6, 12))
+        self.button(note_row, "应用状态", self.set_custom_status,
+                    padx=8, pady=4, font=FONT_SMALL).grid(row=0, column=1, padx=(8, 12))
         self.approver_entry = ttk.Entry(note_row, style="Modern.TEntry", width=10, font=FONT_SMALL)
         self.approver_entry.grid(row=0, column=2, sticky="ew")
         self.approver_entry.bind("<Return>", lambda e: self.apply_approver())
-        self.button(note_row, "保存审批人", self.apply_approver, padx=8, pady=5,
-                    font=FONT_SMALL).grid(row=0, column=3, padx=(6, 0))
+        self.button(note_row, "保存审批人", self.apply_approver, padx=8, pady=4,
+                    font=FONT_SMALL).grid(row=0, column=3, padx=(8, 0))
         self.note_entry = ttk.Entry(note_row, style="Modern.TEntry", font=FONT_SMALL)
-        self.note_entry.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(7, 0))
+        self.note_entry.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(8, 0))
         self.note_entry.bind("<Return>", lambda e: self.apply_note())
-        self.button(note_row, "保存备注", self.apply_note, padx=8, pady=5,
-                    font=FONT_SMALL).grid(row=1, column=3, sticky="ew", padx=(6, 0), pady=(7, 0))
+        self.button(note_row, "保存备注", self.apply_note, padx=8, pady=4,
+                    font=FONT_SMALL).grid(row=1, column=3, sticky="ew", padx=(8, 0), pady=(8, 0))
         for entry, hint in ((self.custom_status_entry, "自定义状态"),
                             (self.note_entry, "为选中链接添加备注"), (self.approver_entry, "审批人")):
             self._setup_hint(entry, hint)
@@ -1051,8 +865,7 @@ class LinkBrowserApp:
             font=FONT_SECTION,
         ).pack(
             anchor="w",
-            padx=10,
-            pady=(12, 10),
+            pady=(0, 12),
         )
 
         tk.Frame(
@@ -1071,8 +884,7 @@ class LinkBrowserApp:
         self.detail_host.pack(
             fill=tk.BOTH,
             expand=True,
-            padx=10,
-            pady=10,
+            pady=(12, 0),
         )
 
         self.detail_canvas = tk.Canvas(
@@ -1171,7 +983,8 @@ class LinkBrowserApp:
 
             font=FONT_SMALL,
         ).pack(
-            pady=100
+            anchor="w",
+            pady=(12, 0),
         )
 
         self.detail_content = tk.Frame(
@@ -1202,7 +1015,7 @@ class LinkBrowserApp:
 
             box.pack(
                 fill=tk.X,
-                pady=(0, 11),
+                pady=(0, 12),
             )
 
             tk.Label(
@@ -1229,12 +1042,12 @@ class LinkBrowserApp:
                 anchor="w",
                 justify="left",
 
-                wraplength=150,
+                wraplength=188,
             )
 
             label.pack(
                 fill=tk.X,
-                pady=(2, 0),
+                pady=(4, 0),
             )
 
             self.detail_labels[key] = label
@@ -1243,11 +1056,9 @@ class LinkBrowserApp:
             self.detail_content,
             "复制链接",
             self.copy_current_detail_link,
-            kind="primary",
-            pady=7,
         ).pack(
-            fill=tk.X,
-            pady=(5, 0),
+            anchor="w",
+            pady=(4, 0),
         )
 
     # ========================================================
@@ -1255,29 +1066,8 @@ class LinkBrowserApp:
     # ========================================================
 
     def _build_add_page(self):
-
-        self.editor_panel = GlassPanel(self.add_page, padding=18, fill=C["card"])
-        self.editor_panel.pack(
-            fill=tk.BOTH,
-            expand=True,
-        )
-
-        form = tk.Frame(
-            self.editor_panel.body,
-            bg=C["card"],
-        )
-
-        form.pack(
-            fill=tk.BOTH,
-            expand=True,
-            padx=6,
-            pady=4,
-        )
-        tk.Label(form, text="批量录入", bg=C["card"], fg=C["text"],
-                 font=FONT_SECTION).pack(anchor="w")
-        tk.Label(form, text="每行一条链接，末尾填写分类；保存时自动分配编号。",
-                 bg=C["card"], fg=C["muted"], font=FONT_SMALL).pack(
-                     anchor="w", pady=(4, 16))
+        form = tk.Frame(self.add_page, bg=C["card"])
+        form.pack(fill=tk.BOTH, expand=True, padx=24, pady=16)
 
         # Batch
         batch_row = tk.Frame(
@@ -1287,14 +1077,13 @@ class LinkBrowserApp:
 
         batch_row.pack(
             fill=tk.X,
-            pady=(0, 14),
+            pady=(0, 16),
         )
 
         tk.Label(
             batch_row,
             text="批次",
 
-            width=8,
             anchor="w",
 
             bg=C["card"],
@@ -1302,7 +1091,8 @@ class LinkBrowserApp:
 
             font=FONT_LABEL,
         ).pack(
-            side=tk.LEFT
+            side=tk.LEFT,
+            padx=(0, 12),
         )
 
         self.batch_entry = ttk.Entry(
@@ -1333,7 +1123,7 @@ class LinkBrowserApp:
 
         input_header.pack(
             fill=tk.X,
-            pady=(0, 6),
+            pady=(0, 8),
         )
 
         tk.Label(
@@ -1365,7 +1155,7 @@ class LinkBrowserApp:
         editor = tk.Frame(
             form,
 
-            bg=C["card"],
+            bg=C["input"],
 
             highlightthickness=1,
             highlightbackground=C["line"],
@@ -1385,14 +1175,14 @@ class LinkBrowserApp:
             bg=C["input"],
             fg=C["text"],
 
-            insertbackground=C["primary"],
+            insertbackground=C["text"],
             selectbackground=C["primary_soft"],
             selectforeground=C["selected_text"],
 
             relief=tk.FLAT,
             bd=0,
 
-            padx=14,
+            padx=12,
             pady=12,
 
             undo=True,
@@ -1402,6 +1192,8 @@ class LinkBrowserApp:
             fill=tk.BOTH,
             expand=True,
         )
+        self.entry_text.bind("<FocusIn>", lambda e: editor.config(highlightbackground=C["focus"]))
+        self.entry_text.bind("<FocusOut>", lambda e: editor.config(highlightbackground=C["line"]))
 
         self.entry_text.bind(
             "<KeyRelease>",
@@ -1417,13 +1209,13 @@ class LinkBrowserApp:
         bottom.pack(
             side=tk.BOTTOM,
             fill=tk.X,
-            pady=(14, 0),
+            pady=(16, 0),
             before=editor,
         )
 
         tk.Label(
             bottom,
-            text="格式：链接 分类",
+            text="格式：链接 空格 分类",
 
             bg=C["card"],
             fg=C["muted"],
@@ -1438,19 +1230,16 @@ class LinkBrowserApp:
             "清空",
             self.clear_entry,
             padx=16,
-            pady=7,
         ).pack(
             side=tk.RIGHT
         )
 
         self.button(
             bottom,
-            "保存",
+            "保存链接",
             self.submit_entries,
             kind="primary",
-            padx=22,
-            pady=7,
-            font=FONT_LABEL,
+            padx=20,
         ).pack(
             side=tk.RIGHT,
             padx=(0, 8),
@@ -1992,15 +1781,6 @@ class LinkBrowserApp:
                 "",
             )
 
-            tag = self._status_tag(
-                status
-            )
-
-            self.listbox.tag_configure(
-                tag,
-                foreground=status_fg(status),
-            )
-
             self.listbox.insert(
                 "",
                 tk.END,
@@ -2013,7 +1793,6 @@ class LinkBrowserApp:
                     "复制",
                 ),
 
-                tags=(tag,),
             )
 
         self.path_meta.config(
@@ -2103,15 +1882,12 @@ class LinkBrowserApp:
             "action",
         )
 
-        for column, value in zip(
-            columns,
-            values,
-        ):
-
-            self.listbox.heading(
-                column,
-                text=value,
-            )
+        anchors = ("w", "e", "e", "w", "center") if len(self.path_stack) < 2 else (
+            "e", "w", "w", "w", "center",
+        )
+        for column, value, anchor in zip(columns, values, anchors):
+            self.listbox.heading(column, text=value, anchor=anchor)
+            self.listbox.column(column, anchor=anchor)
 
         self.root.after_idle(
             self._resize_columns
@@ -2470,21 +2246,6 @@ class LinkBrowserApp:
     # Helpers
     # ========================================================
 
-    def _status_tag(self, status):
-
-        return (
-            "status_"
-            + "".join(
-                char
-                if char.isalnum()
-                else "_"
-                for char in (
-                    status
-                    or "default"
-                )
-            )
-        )
-
     def _toast(
         self,
         x,
@@ -2507,13 +2268,15 @@ class LinkBrowserApp:
             toast,
             text=text,
 
-            bg=C["primary"],
-            fg=C["on_accent"],
+            bg=C["soft"],
+            fg=C["text"],
 
             font=FONT_CAPTION,
 
-            padx=14,
-            pady=7,
+            padx=12,
+            pady=8,
+            highlightthickness=1,
+            highlightbackground=C["line"],
         ).pack()
 
         toast.update_idletasks()

@@ -1,24 +1,13 @@
-"""纯 Tk 的柔光背景、磨砂面板与圆角素材，不依赖平台透明窗口接口。"""
+"""Tk 控件素材与阶段导航。"""
 import math
 import struct
 import tkinter as tk
 import zlib
 
 from .theme import (
-    AMBIENT_BASE, AMBIENT_CLOUDS, BG, DISABLED_BG, DISABLED_FG, FOCUS,
-    INPUT_BG, LINE, MUTED, PRIMARY, PRIMARY_FG, RAISED, RIM, SHADOWS,
-    SIDE, SIDE_FG, SIDE_HOVER, SIDE_ON, SIDE_ON_FG, SOFT, SURFACE,
+    DISABLED_BG, DISABLED_FG, FOCUS, HOVER, INPUT_BG, LINE, MUTED,
+    PRIMARY, PRIMARY_FG, RAISED, SIDE, SOFT, SURFACE, TEXT,
 )
-
-
-def rounded_rect(canvas, x1, y1, x2, y2, radius=16, **kwargs):
-    radius = max(0, min(radius, (x2 - x1) / 2, (y2 - y1) / 2))
-    return canvas.create_polygon(
-        x1 + radius, y1, x2 - radius, y1, x2, y1, x2, y1 + radius,
-        x2, y2 - radius, x2, y2, x2 - radius, y2, x1 + radius, y2,
-        x1, y2, x1, y2 - radius, x1, y1 + radius, x1, y1,
-        smooth=True, splinesteps=24, **kwargs,
-    )
 
 
 # 圆角必须完全落在九宫格固定区内，否则拉伸区会把弧线带到直边上。
@@ -109,108 +98,32 @@ def indicator_image(master, *, kind='check', selected=False, disabled=False, foc
     return image
 
 
-class AmbientBackground(tk.Canvas):
-    """低分辨率生成柔焦光晕，缩放后缓存；仅在窗口尺寸改变时重绘。"""
-    def __init__(self, master):
-        super().__init__(master, bg=BG, bd=0, highlightthickness=0)
-        self.photo = None
-        self._render_job = None
-        self.surfaces = []
-        self.bind('<Configure>', self._schedule_render)
-
-    def _schedule_render(self, _event=None):
-        if self._render_job is not None:
-            self.after_cancel(self._render_job)
-        self._render_job = self.after(90, self._render)
-
-    def _render(self):
-        self._render_job = None
-        scale = 5
-        width = max(1, math.ceil(self.winfo_width() / scale))
-        height = max(1, math.ceil(self.winfo_height() / scale))
-        pixels = bytearray()
-        for y in range(height):
-            ny = y / height
-            for x in range(width):
-                nx = x / width
-                color = list(AMBIENT_BASE)
-                for cx, cy, spread, tint, opacity in AMBIENT_CLOUDS:
-                    alpha = opacity * math.exp(-((nx - cx) ** 2 + (ny - cy) ** 2) / (2 * spread ** 2))
-                    color = [v * (1 - alpha) + t * alpha for v, t in zip(color, tint)]
-                pixels.extend(int(v) for v in color)
-        small = tk.PhotoImage(master=self, data=f'P6\n{width} {height}\n255\n'.encode() + pixels, format='PPM')
-        self.photo = small.zoom(scale)
-        self.delete('ambient')
-        self.create_image(0, 0, image=self.photo, anchor='nw', tags='ambient')
-        self.tag_lower('ambient')
-        for surface in self.surfaces:
-            surface.redraw()
-
-
-class GlassCard(tk.Canvas):
-    """浮层的背景沿用主画布，亮边和柔和投影围出磨砂内容区。"""
-    def __init__(self, master, *, padding=22, fill=SURFACE):
-        super().__init__(master, bg=BG, bd=0, highlightthickness=0)
-        self.ambient = master
-        self.fill = fill
-        self.padding = padding
-        self._crop = None
-        self.content = tk.Frame(self, bg=fill, bd=0)
-        master.surfaces.append(self)
-        self.bind('<Configure>', self.redraw)
-
-    def redraw(self, _event=None):
-        width, height = self.winfo_width(), self.winfo_height()
-        if width < 20 or height < 20:
-            return
-        self.delete('surface')
-        source = self.ambient.photo
-        if source is not None:
-            x, y = max(0, self.winfo_x()), max(0, self.winfo_y())
-            crop_width = min(width, source.width() - x)
-            crop_height = min(height, source.height() - y)
-            if crop_width > 0 and crop_height > 0:
-                self._crop = tk.PhotoImage(master=self, width=width, height=height)
-                self._crop.tk.call(str(self._crop), 'copy', str(source),
-                                   '-from', x, y, x + crop_width, y + crop_height, '-to', 0, 0)
-                self.create_image(0, 0, image=self._crop, anchor='nw', tags='surface')
-        for (inset, offset), shade in zip(((0, 6), (2, 4), (3, 2)), SHADOWS):
-            rounded_rect(self, 4 - inset, 5 + offset, width - 5 + inset, height - 7 + offset,
-                         radius=21, fill=shade, outline='', tags='surface')
-        rounded_rect(self, 4, 3, width - 5, height - 9, radius=20,
-                     fill=self.fill, outline=RIM, width=1.2, tags='surface')
-        self.tag_lower('surface')
-        pad = self.padding
-        self.content.place(x=4 + pad, y=3 + pad,
-                           width=max(1, width - 9 - pad * 2),
-                           height=max(1, height - 12 - pad * 2))
-
-
 class NavItem(tk.Canvas):
-    def __init__(self, master, index, title, hint, family, command):
+    def __init__(self, master, index, title, family, mono_family, command):
         super().__init__(master, bg=SIDE, bd=0, highlightthickness=0,
-                         height=70, width=170, cursor='hand2', takefocus=True)
-        self.index, self.title, self.hint = index, title, hint
-        self.family, self.command = family, command
+                         width=168, height=36, cursor='hand2', takefocus=True)
+        self.index, self.title = index, title
+        self.family, self.mono_family, self.command = family, mono_family, command
         self.selected = self.hovered = self.focused = False
         self.bind('<Configure>', self._draw)
-        self.bind('<Enter>', lambda _e: self._hover(True))
-        self.bind('<Leave>', lambda _e: self._hover(False))
-        self.bind('<FocusIn>', lambda _e: self._focus(True))
-        self.bind('<FocusOut>', lambda _e: self._focus(False))
-        self.bind('<Button-1>', lambda _e: self._activate())
-        self.bind('<Return>', lambda _e: self.command())
-        self.bind('<space>', lambda _e: self.command())
+        self.bind('<Enter>', lambda _e: self._set_hover(True))
+        self.bind('<Leave>', lambda _e: self._set_hover(False))
+        self.bind('<FocusIn>', lambda _e: self._set_focus(True))
+        self.bind('<FocusOut>', lambda _e: self._set_focus(False))
+        self.bind('<Button-1>', self._activate)
+        self.bind('<Return>', self._activate)
+        self.bind('<space>', self._activate)
 
-    def _activate(self):
+    def _activate(self, _event):
         self.focus_set()
         self.command()
+        return 'break'
 
-    def _hover(self, value):
+    def _set_hover(self, value):
         self.hovered = value
         self._draw()
 
-    def _focus(self, value):
+    def _set_focus(self, value):
         self.focused = value
         self._draw()
 
@@ -221,13 +134,13 @@ class NavItem(tk.Canvas):
     def _draw(self, _event=None):
         self.delete('all')
         width = self.winfo_width()
-        color = SIDE_ON if self.selected else SIDE_HOVER if self.hovered else SIDE
-        rounded_rect(self, 1, 2, width - 2, 67, 12, fill=color,
-                     outline=FOCUS if self.focused else RIM if self.selected else color)
-        rounded_rect(self, 12, 18, 43, 49, 9, fill=PRIMARY if self.selected else RAISED, outline='')
-        self.create_text(28, 34, text=f'{self.index:02}', font=(self.family, 10, 'bold'),
-                         fill=PRIMARY_FG if self.selected else MUTED)
-        self.create_text(54, 25, text=self.title, anchor='w',
-                         font=(self.family, 11, 'bold' if self.selected else 'normal'),
-                         fill=SIDE_ON_FG if self.selected else SIDE_FG)
-        self.create_text(54, 46, text=self.hint, anchor='w', font=(self.family, 9), fill=MUTED)
+        if width <= 2:
+            return
+        bg = RAISED if self.selected else SOFT if self.hovered else SIDE
+        outline = FOCUS if self.focused else HOVER if self.selected else bg
+        self.create_rectangle(1, 1, width - 1, 35, fill=bg, outline=outline)
+        if self.selected:
+            self.create_rectangle(2, 8, 4, 28, fill=PRIMARY, outline='')
+        self.create_text(12, 18, text=f'{self.index:02}', anchor='w',
+                         font=(self.mono_family, 10), fill=PRIMARY if self.selected else MUTED)
+        self.create_text(40, 18, text=self.title, anchor='w', font=(self.family, 11), fill=TEXT)
