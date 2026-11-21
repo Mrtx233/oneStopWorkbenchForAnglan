@@ -5,21 +5,29 @@
 
 
 # 算出「这件商品要写哪些组合」，并带上代表价与每个组合的颜色图。
-def selected_product_combinations(product, selected_options=None, skip_options=None, option_limits=None):
+def selected_product_combinations(product, selected_options=None, skip_options=None, option_limits=None,
+                                  max_entries=None):
     product = clean_product_option_values(product)
-    return _selected_product_combinations(product, selected_options, skip_options, option_limits)
+    return _selected_product_combinations(
+        product, selected_options, skip_options, option_limits, max_entries=max_entries)
 
 
-def _selected_product_combinations(product, selected_options=None, skip_options=None, option_limits=None):
+def _selected_product_combinations(product, selected_options=None, skip_options=None, option_limits=None,
+                                   max_entries=None):
     """内部入口：维度和值、颜色图片映射使用同一份已清洗数据。"""
     # 颜色 -> 图片 的映射阶段 02 已经配好，直接取用，不再回查 variant/image_id
     options = _analysis_options(product, selected_options, skip_options)
     options = limit_option_values(options, option_limits)
+    if max_entries == 0:
+        return options, product_modal_prices(product), []
     colors = next((values for entry in product.get("options", [])
                    for key, values in entry.items() if is_color_name(key)), {})
     color_index = next((i for i, opt in enumerate(options) if is_color_name(opt["name"])), None)
     entries = []
-    for combo in build_option_combos(options):
+    combos = build_option_combos(options)
+    if max_entries is not None:
+        combos = islice(combos, max_entries)
+    for combo in combos:
         image = colors.get(combo[color_index], "") if color_index is not None else ""
         image = format_image_url(image)
         # image_status 供预览统计：hit=匹到颜色图，unlinked=有颜色列但缺图，no_opt=商品本身没有颜色列

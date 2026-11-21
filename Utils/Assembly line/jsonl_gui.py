@@ -1,17 +1,17 @@
 # -*- coding: utf-8 -*-
 
-import json
 import sys
 import tkinter as tk
 from datetime import datetime
 from pathlib import Path
-from tkinter import ttk
+from tkinter import messagebox, ttk
 from urllib.parse import urlparse
 
 UTILS_DIR = Path(__file__).resolve().parents[1]
 if str(UTILS_DIR) not in sys.path:
     sys.path.insert(0, str(UTILS_DIR))
 from workbench_ui import GlassBackground, GlassPanel, GlassNav, apply_glass_controls
+from jsonl_store import load_records as load_jsonl_records, save_records as save_jsonl_records
 
 
 JSONL_PATH = Path(__file__).parent / "links.jsonl"
@@ -134,21 +134,7 @@ STATUS_THEME = {
 # ============================================================
 
 def load_records():
-    records = []
-
-    if not JSONL_PATH.exists():
-        return records
-
-    for line in JSONL_PATH.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-
-        try:
-            records.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
-
-    return records
+    return load_jsonl_records(JSONL_PATH)
 
 
 def build_tree(records):
@@ -235,6 +221,9 @@ class LinkBrowserApp:
 
         self.show_batches()
         self.switch_page("library")
+        if self.records.invalid_lines:
+            self.set_status(
+                f"发现 {len(self.records.invalid_lines)} 行损坏或格式异常：原文保留，保存时自动备份")
 
     # ========================================================
     # ttk
@@ -1579,7 +1568,8 @@ class LinkBrowserApp:
 
             self.records.extend(added)
 
-            self.save_all()
+            if not self.save_all():
+                return
 
             self.tree = build_tree(
                 self.records
@@ -1669,7 +1659,8 @@ class LinkBrowserApp:
 
                 record["updated_at"] = now
 
-        self.save_all()
+        if not self.save_all():
+            return
 
         self.tree = build_tree(
             self.records
@@ -1737,7 +1728,8 @@ class LinkBrowserApp:
                 record[field] = value
                 record["updated_at"] = now
 
-        self.save_all()
+        if not self.save_all():
+            return
 
         self.tree = build_tree(
             self.records
@@ -2537,21 +2529,12 @@ class LinkBrowserApp:
         )
 
     def save_all(self):
-
-        with JSONL_PATH.open(
-            "w",
-            encoding="utf-8",
-        ) as file:
-
-            for record in self.records:
-
-                file.write(
-                    json.dumps(
-                        record,
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
+        try:
+            save_jsonl_records(JSONL_PATH, self.records)
+        except (OSError, TypeError, ValueError, RuntimeError) as exc:
+            messagebox.showerror("保存失败", f"{exc}\n修改尚未保存。", parent=self.root)
+            return False
+        return True
 
     def _update_sidebar_count(self):
 

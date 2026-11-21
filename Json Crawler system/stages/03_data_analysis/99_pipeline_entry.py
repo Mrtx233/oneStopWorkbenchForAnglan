@@ -1,5 +1,6 @@
 """阶段 03 入口：汇总统计、组合预览、每域名十字段 CSV。"""
 import csv
+import json
 from pathlib import Path
 from common.atomic_io import replace_file
 
@@ -40,9 +41,11 @@ def run(settings, stop, emit):
         print(f'其他维度参与组合，本轮选项：{selected}', flush=True)
     emit('stats', options=dict(counts), totals=dict(totals), products=sum(combos.values()))
     if settings.get('action') == 'preview':
-        # 预览只展开组合、不落盘；行数会远大于商品数，所以只回传前 200 行，够界面画表就行
-        rows, missing = analyzer.expand_cartesian(source, selected, option_limits=limits)
-        emit('preview', rows=rows[:200], total=len(rows), missing=missing)
+        # 只生成前 200 个组合，其余按维度数量计算总数，不展开也不落盘。
+        rows, total, missing = analyzer.expand_cartesian(
+            source, selected, option_limits=limits, row_limit=200, stop=stop)
+        if not stop.is_set():
+            emit('preview', rows=rows, total=total, missing=missing)
         return
     output = Path(settings['project']) / 'CSV'
     output.mkdir(parents=True, exist_ok=True)
@@ -52,13 +55,21 @@ def run(settings, stop, emit):
         if stop.is_set():
             return  # 一个域名一个文件，停止时最多丢当前这个，已写出的表都是完整的
         try:
+            products = []
             rows, skipped = analyzer.build_ten_field_rows(
                 path, selected_options=selected, option_limits=limits,
-                color_images_only=color_images_only, failures=failures)
+                color_images_only=color_images_only, failures=failures,
+                output_products=products)
             if not rows:
                 print(f'跳过空文件：{path}', flush=True)
                 continue
             target = output / f'{domain}_style.csv'
+            json_target = target.with_suffix('.json')
+            # 与 CSV 一行一商品对应，保存拆色后的新 md5 和本块颜色，供阶段 3.1 同步切分。
+            def _write_products(tmp_path):
+                with open(tmp_path, 'w', encoding='utf-8') as f:
+                    json.dump(products, f, ensure_ascii=False, indent=2)
+            replace_file(json_target, _write_products, '.json')
             # 原子写盘统一走 replace_file：先写同目录临时文件再 os.replace，
             # 中途被杀或断电不会留下半截 CSV，也不会覆盖成空文件。
             # utf-8-sig 带 BOM，Excel/WPS 双击打开中文不乱码；csv.writer 自动处理含逗号/换行的字段。
@@ -72,6 +83,7 @@ def run(settings, stop, emit):
             exported += 1
             emit('progress', current=index, total=len(groups), text=f'{domain}：{len(rows)} 行，跳过 {skipped} 个')
             emit('artifact', path=str(target), text='十字段表')
+            emit('artifact', path=str(json_target), text='十字段表对应商品 JSON')
         except Exception as exc:
             # 单个域名失败不中断整轮：记下原因，最后汇总成一个清单文件给使用者核对
             failures.append(f'{domain}：{exc}')

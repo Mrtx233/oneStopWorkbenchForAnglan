@@ -265,7 +265,7 @@ class SwitchToolGui:
         ttk.Spinbox(param_row, from_=1, to=99, width=5, textvariable=self.split_parts_var).grid(
             row=1, column=2, sticky="ew", pady=(4, 0))
 
-        ttk.Checkbutton(content, text="覆盖同名文件（不勾选则加「_新」另存）",
+        ttk.Checkbutton(content, text="覆盖同名文件（不勾选则按「_新、_新2…」另存）",
                         variable=self.split_overwrite_var).grid(
             row=3, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
@@ -333,7 +333,7 @@ class SwitchToolGui:
                 self.log(summary)
             except Exception as exc:
                 self.log(f"失败: {exc}")
-                self.root.after(0, lambda: messagebox.showerror("运行失败", str(exc)))
+                self.root.after(0, messagebox.showerror, "运行失败", str(exc))
             finally:
                 self.root.after(0, lambda: self.set_running(False))
 
@@ -368,7 +368,7 @@ class SwitchToolGui:
         ttk.Label(param_row, text="分组列:", font=("Microsoft YaHei UI", 11, "bold")).pack(side="left")
         ttk.Entry(param_row, textvariable=self.split_each_title_var, width=12).pack(side="left", padx=(4, 15))
 
-        ttk.Checkbutton(content, text="覆盖同名文件（不勾选则加「_新」另存）",
+        ttk.Checkbutton(content, text="覆盖同名文件（不勾选则按「_新、_新2…」另存）",
                         variable=self.split_each_overwrite_var).grid(
             row=3, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
@@ -427,7 +427,7 @@ class SwitchToolGui:
                 self.log(summary)
             except Exception as exc:
                 self.log(f"失败: {exc}")
-                self.root.after(0, lambda: messagebox.showerror("运行失败", str(exc)))
+                self.root.after(0, messagebox.showerror, "运行失败", str(exc))
             finally:
                 self.root.after(0, lambda: self.set_running(False))
 
@@ -514,7 +514,7 @@ class SwitchToolGui:
                 slim_src_links_mod.slim_src_links_target(input_path, keep=keep, overwrite=overwrite, log=self.log)
             except Exception as exc:
                 self.log(f"失败: {exc}")
-                self.root.after(0, lambda: messagebox.showerror("运行失败", str(exc)))
+                self.root.after(0, messagebox.showerror, "运行失败", str(exc))
             finally:
                 self.root.after(0, lambda: self.set_running(False))
 
@@ -800,7 +800,7 @@ class SwitchToolGui:
                     self.log(f"输出: {output}")
             except Exception as exc:
                 self.log(f"失败: {exc}")
-                self.root.after(0, lambda: messagebox.showerror("运行失败", str(exc)))
+                self.root.after(0, messagebox.showerror, "运行失败", str(exc))
             finally:
                 self.root.after(0, lambda: self.set_running(False))
 

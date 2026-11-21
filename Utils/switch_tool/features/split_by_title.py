@@ -46,9 +46,21 @@ def save_workbook(wb, path):
         raise PermissionError(f"文件被其他程序占用（如 Excel），请关闭后重试：{path}") from None
 
 
-def save_split_workbook(path, header, rows):
+def available_split_path(path, overwrite):
+    """不覆盖时递增另存后缀，直到找到尚未占用的文件名。"""
+    path = Path(path)
+    candidate = path
+    index = 1
+    while not overwrite and candidate.exists():
+        suffix = "_新" if index == 1 else f"_新{index}"
+        candidate = path.with_stem(path.stem + suffix)
+        index += 1
+    return candidate
+
+
+def save_split_workbook(path, header, rows, overwrite=True):
     """按 utf-8 写出 CSV 拆分结果。"""
-    with open(path, "w", encoding="utf-8", newline="") as f:
+    with open(path, "w" if overwrite else "x", encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(header)
         writer.writerows(rows)
@@ -111,10 +123,8 @@ def split_by_title(csv_path, parts, title_col=DEFAULT_TITLE_COL, price_col=DEFAU
     outdir = csv_path.parent
     outputs = []
     for k, bucket in enumerate(buckets, 1):
-        out_path = outdir / f"{stem}_{k}.csv"
-        if not overwrite and out_path.exists():
-            out_path = outdir / f"{stem}_{k}_新.csv"
-        save_split_workbook(out_path, header, bucket)
+        out_path = available_split_path(outdir / f"{stem}_{k}.csv", overwrite)
+        save_split_workbook(out_path, header, bucket, overwrite=overwrite)
         outputs.append(out_path)
         log(f"[完成] {out_path.name} -> {len(bucket)} 行")
 

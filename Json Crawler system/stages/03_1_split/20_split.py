@@ -78,15 +78,29 @@ def _read_csv(path):
     return header, rows
 
 
-def _write_csv(path, header, rows):
+def _available_output_paths(paths, overwrite):
+    """为一组关联文件选同一后缀，任一路径已占用就继续递增。"""
+    paths = tuple(Path(path) for path in paths)
+    if overwrite:
+        return paths
+    index = 0
+    while True:
+        suffix = "" if index == 0 else ("_新" if index == 1 else f"_新{index}")
+        candidates = tuple(path.with_stem(path.stem + suffix) for path in paths)
+        if not any(path.exists() for path in candidates):
+            return candidates
+        index += 1
+
+
+def _write_csv(path, header, rows, overwrite=True):
     """按 utf-8 写出切分结果（与阶段三十字段表同编码约定）。"""
-    with open(path, "w", encoding="utf-8", newline="") as f:
+    with open(path, "w" if overwrite else "x", encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(header)
         writer.writerows(rows)
 
 
-def _bucket_by_product(groups, price_index, parts):
+def _bucket_by_product(groups, price_index, parts, md5_index):
     """把按 title 分好的行，按「商品块(md5)」轮询分配到 parts 个桶。
 
     同一 md5 的所有行始终在同一桶（不跨文件）；商品块按价格排序后，用全局轮询计数
@@ -100,10 +114,10 @@ def _bucket_by_product(groups, price_index, parts):
         # 先把行按 md5 聚成商品块，保持块内原始行顺序。
         blocks = []
         for r in rows:
-            if blocks and blocks[-1][0] == _row_md5(r):
+            if blocks and blocks[-1][0] == _row_md5(r, md5_index):
                 blocks[-1][1].append(r)
             else:
-                blocks.append([_row_md5(r), [r]])
+                blocks.append([_row_md5(r, md5_index), [r]])
         # 有价格列时，商品块按「块内第一条行的价格」排序（同商品价格一致，取首条即可）。
         if price_index is not None:
             blocks.sort(key=lambda b: _price_sort_key(b[1][0][price_index]))
@@ -116,10 +130,9 @@ def _bucket_by_product(groups, price_index, parts):
     return list(zip(buckets, buckets_md5))
 
 
-def _row_md5(row):
-    """取一行的 md5 值；列不存在时用整行内容哈希兜底，保证同一商品仍能聚块。"""
-    # 调用方会先确认 md5 列是否存在；这里仅做安全兜底。
-    return row[-1] if row else ""
+def _row_md5(row, md5_index):
+    """按表头位置取商品标识，不依赖 md5 恰好是最后一列。"""
+    return row[md5_index].strip() if md5_index is not None and md5_index < len(row) else ""
 
 
 def split_by_title(csv_path, parts, title_col=config.DEFAULT_TITLE_COL,
@@ -163,7 +176,7 @@ def split_by_title(csv_path, parts, title_col=config.DEFAULT_TITLE_COL,
         pairs = list(zip(buckets, buckets_md5))
     else:
         # 按商品块轮询（同一 md5 不跨文件）。
-        pairs = _bucket_by_product(groups, pi, parts)
+        pairs = _bucket_by_product(groups, pi, parts, md5_index)
 
     stem = csv_path.stem
     outdir = csv_path.parent
@@ -178,13 +191,12 @@ def split_by_title(csv_path, parts, title_col=config.DEFAULT_TITLE_COL,
         json_dir = part_folder / "json"
         csv_dir.mkdir(parents=True, exist_ok=True)
         json_dir.mkdir(parents=True, exist_ok=True)
-        out_path = csv_dir / f"{part_name}.csv"
-        if not overwrite and out_path.exists():
-            out_path = csv_dir / f"{part_name}_新.csv"
-        _write_csv(out_path, header, bucket)
+        out_path, json_path = _available_output_paths(
+            (csv_dir / f"{part_name}.csv", json_dir / f"{part_name}.json"), overwrite)
+        _write_csv(out_path, header, bucket, overwrite=overwrite)
         outputs.append(out_path)
         md5_sets[str(out_path)] = md5_set
-        json_targets[str(out_path)] = json_dir / f"{part_name}.json"
+        json_targets[str(out_path)] = json_path
         log(f"[完成] {out_path.name} -> {len(bucket)} 行 / {len(md5_set)} 个商品")
 
     log(f"[完成] {csv_path.name}：共 {len(rows)} 行 / {len(groups)} 组，拆分 {parts} 份")
@@ -220,6 +232,7 @@ def split_by_title_each(csv_path, title_col=config.DEFAULT_TITLE_COL,
 
     ti = header.index(title_col)
     has_md5 = config.MD5_COL in header
+    md5_index = header.index(config.MD5_COL) if has_md5 else None
 
     # 按 title 值分组，保持组内原始顺序。
     groups = {}
@@ -247,14 +260,13 @@ def split_by_title_each(csv_path, title_col=config.DEFAULT_TITLE_COL,
         json_dir = cat_folder / "json"
         csv_dir.mkdir(parents=True, exist_ok=True)
         json_dir.mkdir(parents=True, exist_ok=True)
-        out_path = csv_dir / f"{name}.csv"
-        if not overwrite and out_path.exists():
-            out_path = csv_dir / f"{name}_新.csv"
-        _write_csv(out_path, header, group)
+        out_path, json_path = _available_output_paths(
+            (csv_dir / f"{name}.csv", json_dir / f"{name}.json"), overwrite)
+        _write_csv(out_path, header, group, overwrite=overwrite)
         outputs.append(out_path)
-        md5_set = set(r[-1] for r in group) if has_md5 else set()
+        md5_set = {_row_md5(r, md5_index) for r in group} if has_md5 else set()
         md5_sets[str(out_path)] = md5_set
-        json_targets[str(out_path)] = json_dir / f"{name}.json"
+        json_targets[str(out_path)] = json_path
         log(f"[完成] {out_path.name} -> {len(group)} 行")
 
     log(f"[完成] {csv_path.name}：共 {len(rows)} 行 / {len(groups)} 个 title，已按 title 各写一个文件")
@@ -302,19 +314,24 @@ def split_json_by_md5(products, md5_sets, json_targets=None, overwrite=True, log
         if md5:
             by_md5.setdefault(md5, prod)
 
+    # 新拆色商品只存在于阶段三的配套 JSON；缺失时应提示重新导出，避免静默写出空 JSON。
+    required = set().union(*md5_sets.values())
+    missing = required.difference(by_md5)
+    if missing:
+        raise ValueError(f'对应 JSON 缺少 {len(missing)} 个商品 md5，请重新运行阶段三生成配套 CSV 和 JSON')
+
     written = []
     for csv_path, md5_set in md5_sets.items():
         csv_path = Path(csv_path)
         # JSON 目标路径：优先用 json_targets 指定，否则与 CSV 同名同目录。
         target = json_targets.get(str(csv_path))
         if target is None:
-            target = csv_path.with_suffix(".json")
+            # 独立调用时可另存；主切分传入的目标已与 CSV 配对，不能再单独改名。
+            target, = _available_output_paths((csv_path.with_suffix(".json"),), overwrite)
         json_path = Path(target)
-        if not overwrite and json_path.exists():
-            json_path = json_path.with_name(json_path.stem + "_新.json")
         json_path.parent.mkdir(parents=True, exist_ok=True)
         matched = [by_md5[m] for m in md5_set if m in by_md5]
-        with open(json_path, "w", encoding="utf-8") as f:
+        with open(json_path, "w" if overwrite else "x", encoding="utf-8") as f:
             json.dump(matched, f, ensure_ascii=False, indent=2)
         written.append((json_path, len(matched)))
         log(f"[完成] {json_path.name} -> {len(matched)} 个商品")

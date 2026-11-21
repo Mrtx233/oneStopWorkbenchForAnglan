@@ -8,7 +8,7 @@
 DEFAULT_TITLE_COL = "title"      # 分组列：十字段表第一列「分类名」
 DEFAULT_PRICE_COL = "price1"     # 价格列：均分拆分时组内排序依据
 DEFAULT_PARTS = 2                # 均分拆分的默认份数
-MD5_COL = "md5"                  # 商品唯一标识列：同一商品的多个组合行共享同一 md5，切分时按它整块分配
+MD5_COL = "md5"                  # 独立商品标识；按颜色拆出的商品各自拥有 md5，可分别分配
 
 # 两种切分模式：均分 N 份 / 按 title 各自成文件。
 MODE_SPLIT_PARTS = "parts"       # 按份数均分（轮询打散）

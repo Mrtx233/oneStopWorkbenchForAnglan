@@ -5,8 +5,9 @@
   - parts：按 title 分组、按价格排序后，按「商品块(md5)」轮询均分成 N 份（settings['split_parts']）
   - each ：每个不同的 title 值独立写成一个文件
 
-切分 CSV 后，按各份 CSV 的 md5 集合从 Json/Data Analysis/<域名>.json 筛出对应商品对象，
-写成与切分 CSV 同名同目录的 .json（同一 md5 不跨文件，故每个商品只归入一份）。
+切分 CSV 后，按各份 CSV 的 md5 集合从配套的 <域名>_style.json 筛出对应商品对象；
+历史文件没有配套 JSON 时，兼容读取 Json/Data Analysis/<域名>.json。
+颜色拆分后的独立商品各有新 md5，可以分配到不同文件。
 
 复用工作台事件协议：progress 上报进度、artifact 上报产物、result 上报结果。
 """
@@ -91,9 +92,13 @@ def run(settings, stop, emit):
 
             # 同步切分对应 JSON：按各份 CSV 的 md5 集合筛商品对象。
             domain = _domain_from_style_csv(path)
-            json_path = analysis_dir / f'{domain}.json'
+            json_path = path.with_suffix('.json')
+            if not json_path.is_file():
+                json_path = analysis_dir / f'{domain}.json'
             products = splitter.load_json_products(json_path)
             if products is None:
+                if json_path.is_file():
+                    raise ValueError(f'无法读取对应商品 JSON：{json_path}')
                 print(f'[提示] 未找到对应 JSON，跳过 JSON 同步切分：{json_path}', flush=True)
                 continue
             json_written = splitter.split_json_by_md5(

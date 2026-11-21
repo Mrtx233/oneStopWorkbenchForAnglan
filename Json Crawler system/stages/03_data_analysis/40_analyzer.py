@@ -1,5 +1,6 @@
 # 登记为模块名 analyzer：本层只做「读文件 + 组织数据」，写 CSV 与 UI 通信在 99_pipeline_entry。
 import json
+from math import prod as combination_count
 from collections import Counter, defaultdict
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -67,54 +68,54 @@ def stat_options(data_dir):
     return opt_count, opt_total, combos
 
 
-# 预览用展开：不写 CSV，只把每行组合摊成记录给界面看（界面只取前面若干行）。
-def expand_cartesian(data_dir, selected_options, option_limits=None):
-    rows, missing_count = [], 0
+# 只生成预览所需的前 row_limit 行，组合总数通过各维度数量相乘统计。
+def expand_cartesian(data_dir, selected_options, option_limits=None, row_limit=200, stop=None):
+    rows, total, missing_count = [], 0, 0
     selected = list(selected_options)
-    wanted = _expand_selected(selected)
+    product_parser.normalize_option_limits(option_limits)
+    row_limit = max(0, int(row_limit))
     for _, prod in iter_products(data_dir):
-        options = product_parser.get_sorted_options(prod, skip_options=config.SKIP_OPTIONS)
-        options = [opt for opt in options if opt['name'].strip().casefold() in wanted]
+        if stop is not None and stop.is_set():
+            break
+        # 拆色只是把 Color 连续分段，既不改变组合总数，也不改变逐组合预览的顺序。
+        # 因此直接读取完整维度，避免生成所有颜色块并反复复制商品。
+        options, prices, entries = product_parser.selected_product_combinations(
+            prod, selected, config.SKIP_OPTIONS, option_limits=None,
+            max_entries=max(0, row_limit - len(rows)))
+        total += combination_count(len(opt['values']) for opt in options)
         names = [opt['name'] for opt in options]
         have = _expand_selected(names)
         # 勾了但这件商品没有的列（例如勾 Size 而商品只有 Color）计入 missing，提醒用户会有空列
         if any(n.casefold() not in have for n in selected):
             missing_count += 1
-        for chunk in option_split.option_limit_sets(options, option_limits):
-            sliced = option_split.restrict_product(prod, chunk)
-            chunk_options, prices, entries = product_parser.selected_product_combinations(
-                sliced, selected, config.SKIP_OPTIONS,
-                option_limits=None)  # 上限已由切块体现，这里再传会二次截断
-            chunk_names = [opt['name'] for opt in chunk_options] or names
-            for entry in entries:
-                # 行数 = 块数 x 笛卡尔积：这就是预览远多于商品数的原因
-                values = dict(zip(chunk_names, entry['combo']))
-                color_value = next((values[name] for name in chunk_names if product_parser.is_color_name(name)), '')
-                rows.append({
-                    'handle': prod.get('handle') or unquote(urlsplit(prod.get('url', '')).path).rstrip('/').split('/')[-1],
-                    'title': prod.get('title', ''),
-                    'variant_title': ' / '.join(entry['combo']),
-                    'price': prices['price'],
-                    'compare_at_price': prices['compare_at_price'],
-                    'currency': prices['currency'],
-                    'image_url': entry['image_url'],
-                    'image_status': entry['image_status'],
-                    # 勾选的列动态铺成字段，缺值时颜色列回填本行颜色，保证预览表不出现整列空白
-                    **{name: values.get(name, color_value if product_parser.is_color_name(name) else '') for name in selected},
-                })
-    return rows, missing_count
+        for entry in entries:
+            values = dict(zip(names, entry['combo']))
+            color_value = next((values[name] for name in names if product_parser.is_color_name(name)), '')
+            rows.append({
+                'handle': prod.get('handle') or unquote(urlsplit(prod.get('url', '')).path).rstrip('/').split('/')[-1],
+                'title': prod.get('title', ''),
+                'variant_title': ' / '.join(entry['combo']),
+                'price': prices['price'],
+                'compare_at_price': prices['compare_at_price'],
+                'currency': prices['currency'],
+                'image_url': entry['image_url'],
+                'image_status': entry['image_status'],
+                **{name: values.get(name, color_value if product_parser.is_color_name(name) else '') for name in selected},
+            })
+    return rows, total, missing_count
 
 
 # 十字段行的批量入口：按域名把汇总 JSON 里的商品全部转成 CSV_FIELDS 那十列。
 def build_ten_field_rows(data_dir, selected_options=None, option_limits=None,
-                         color_images_only=False, failures=None):
+                         color_images_only=False, failures=None, output_products=None):
     rows, invalid = [], 0
     for f, prod in iter_products(data_dir):
         url = prod['url']  # 汇总记录自带链接，仅用于失败清单里指名道姓
         try:
             rows.extend(option_split.parse_product_rows(
                 {'product': prod}, selected_options=selected_options,
-                option_limits=option_limits, color_images_only=color_images_only))
+                option_limits=option_limits, color_images_only=color_images_only,
+                output_products=output_products))
         except product_parser.InvalidProductError as exc:
             # 无效币种、价格或超长款式：记录原因并继续其它商品。
             invalid += 1

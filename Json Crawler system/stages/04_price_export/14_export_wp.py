@@ -60,8 +60,7 @@ def deterministic_variant_sku(product_md5, variant_index):
 
 
 def _dedup_variant_sku(product_md5, variant_index, used_skus):
-    # 颜色拆分会让同一 md5 对应多行商品，仅靠 md5+序号派生仍可能碰撞；这里按序号递增
-    # 兜底去重，保证每个变体/单值 SKU 全局唯一。
+    # 兼容旧表中多行复用 md5 的情况：按序号递增兜底去重。
     sku = deterministic_variant_sku(product_md5, variant_index)
     while sku in used_skus:
         variant_index += 1
@@ -157,8 +156,7 @@ def convert_to_wp(input_file_name, output_file_name):
 
     rows = []
     used_parent_skus = set()
-    used_variant_skus = set()  # 变体/单值商品 SKU 全量去重：颜色拆分后同 md5 会拆成多行，
-    # 仅靠 md5+序号派生仍会碰撞，这里兜底保证每个变体 SKU 全局唯一。
+    used_variant_skus = set()  # 变体/单值商品 SKU 全量去重，兼容旧表复用 md5。
     total = len(input_df)
 
     for idx in range(total):

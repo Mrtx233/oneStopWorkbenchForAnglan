@@ -6,7 +6,7 @@
 #
 # 输入只有阶段二的九字段汇总记录一种形态：入口 40_analyzer.iter_products 已用 is_analysis_product
 # 做过守卫，非法输入在那里就报错，所以本文件不再保留原始 Shopify 商品的解析分支。
-from itertools import product as itertools_product
+from itertools import islice, product as itertools_product
 from urllib.parse import urlparse, urlunparse
 
 # 注意：下面这四个 import 里有几个本文件自己并不直接用，而是给 32_parser_part2 用的——
@@ -93,14 +93,11 @@ def limit_option_values(options, option_limits=None):
             for opt in options]
 
 
-# 各列取值的笛卡尔积：一行商品对应一个组合，行数等于各列取值数相乘。
+# 惰性生成笛卡尔积，避免在预览取前几行前先创建全部组合。
 def build_option_combos(options):
     value_groups = [[format_combo_value(value) for value in option.get("values", [])] for option in options]
-    if not value_groups:
-        return [()]  # 完全没有选项时也要出一行，否则整件商品会被丢掉
-    # 行数膨胀发生在这里：所以颜色上限必须在切块阶段（option_split）就把颜色数压住，
-    # 不然 颜色 x 尺码 会把 styles1 长度和 Excel 行数一起撑爆
-    return list(itertools_product(*value_groups))
+    # 无选项时 product() 自然产出一个空组合；任一维度为空时不产出组合。
+    return itertools_product(*value_groups)
 
 
 # 取商品的「代表价」：一行商品只能有一个价格。

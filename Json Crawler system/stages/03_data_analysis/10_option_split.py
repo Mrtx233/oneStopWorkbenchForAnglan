@@ -1,4 +1,7 @@
 """只把 Color 按上限切段拆行；拆出的商品只保留自身颜色图。"""
+import hashlib
+import json
+
 import config          # 00_config，取 SKIP_OPTIONS 等本阶段常量
 import product_parser  # 30_product_parser，所有解析能力都从这里来
 
@@ -84,7 +87,19 @@ def restrict_product(product, chunk):
                 slim["Color"] = [val for val in values if val in allow]
         new_options.append(slim)
     cloned["options"] = new_options
-    return cloned
+    return product_parser.clean_product_option_values(cloned)
+
+
+def color_product_md5(product, chunk):
+    """由来源商品和本块颜色派生独立标识，同一颜色块重复导出保持稳定。"""
+    source = str(product.get("md5") or "").strip() or product["url"]
+    colors = next(opt["values"] for opt in chunk if is_color_name(opt["name"]))
+    # 不使用块序号、价格或图片，避免重新排序、改价或换图改变商品身份。
+    payload = json.dumps(
+        ["color-product-v1", source, sorted(str(value) for value in colors)],
+        ensure_ascii=False, separators=(",", ":"),
+    )
+    return hashlib.md5(payload.encode("utf-8")).hexdigest()
 
 
 # 返回 True 表示 src_links 只留本块颜色图，丢掉相册里的其它（后面四张）主图。
@@ -105,25 +120,33 @@ def drop_gallery_images(selected_options, options, split_by_color, color_images_
 
 
 # 十字段行的生成入口：颜色切块 → 逐块解析 → 需要时把 src_links 收成本块颜色图。
-def parse_product_rows(data, selected_options=None, option_limits=None, color_images_only=False):
+def parse_product_rows(data, selected_options=None, option_limits=None, color_images_only=False,
+                       output_products=None):
     product = data.get("product", data)
     # SKIP_OPTIONS 在这里生效：先把「ships from」之类的非款式列整列剔掉再参与拆行
     options = product_parser.get_sorted_options(product, skip_options=config.SKIP_OPTIONS)
     if selected_options is not None:
         selected = expand_selected_names(selected_options)
         options = [opt for opt in options if opt["name"].strip().casefold() in selected]
-    rows = []
+    rows, products = [], []
     chunks = option_limit_sets(options, option_limits)
     split_by_color = len(chunks) > 1
     drop_gallery = drop_gallery_images(selected_options, options, split_by_color, color_images_only)
     for chunk in chunks:
         sliced = restrict_product(product, chunk)
+        if split_by_color:
+            sliced["md5"] = color_product_md5(product, chunk)
         row = product_parser.parse_product(
             {"product": sliced}, selected_options=selected_options, option_limits=None,
         )
         # option_limits 传 None：上限已经体现在切块上，再传进去会被二次截断，块内数量就对不上
         if drop_gallery:
             # 直接从已拼好的 styles1 反解图片，比重新推断图片顺序更不容易和款式串错位
-            row["src_links"] = "#".join(product_parser.style_image_urls(row["styles1"]))
+            sliced["images"] = product_parser.style_image_urls(row["styles1"])
+            row["src_links"] = "#".join(sliced["images"])
         rows.append(row)
+        products.append(sliced)
+    # 整件商品的所有颜色块解析成功后再交给调用方，失败时不遗留半组 JSON。
+    if output_products is not None:
+        output_products.extend(products)
     return rows

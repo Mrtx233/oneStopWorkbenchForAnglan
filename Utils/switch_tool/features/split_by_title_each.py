@@ -6,7 +6,7 @@ from pathlib import Path
 
 from ..constants import DEFAULT_TITLE_COL
 from ..utils import detect_encoding
-from .split_by_title import sanitize_sheet_name, save_split_workbook
+from .split_by_title import available_split_path, sanitize_sheet_name, save_split_workbook
 
 
 def split_by_title_each(csv_path, title_col=DEFAULT_TITLE_COL, overwrite=True, log=print):
@@ -47,10 +47,8 @@ def split_by_title_each(csv_path, title_col=DEFAULT_TITLE_COL, overwrite=True, l
         used_names[name] = count + 1
         if count:
             name = f"{name}_{count + 1}"
-        out_path = out_folder / f"{name}.csv"
-        if not overwrite and out_path.exists():
-            out_path = out_folder / f"{name}_新.csv"
-        save_split_workbook(out_path, header, group)
+        out_path = available_split_path(out_folder / f"{name}.csv", overwrite)
+        save_split_workbook(out_path, header, group, overwrite=overwrite)
         outputs.append(out_path)
         log(f"[完成] {out_path.name} -> {len(group)} 行")
 
