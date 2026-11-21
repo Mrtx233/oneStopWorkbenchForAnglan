@@ -2,9 +2,12 @@
 # 登记为旧模块名 network_utils：构造 Shopify .json 链接、按 JSON URL 去重、抓包取 JSON、识别币种与汇率换算。
 import json
 import math
+import os
 import ssl
+import tempfile
 import time
 import urllib.request
+from pathlib import Path
 from urllib.parse import urlparse, urlunparse
 from url_utils import normalize_request_url, normalize_url_dashes
 
@@ -13,8 +16,72 @@ try:
 except ImportError:
     certifi = None
 
-_exchange_rates_cache = {}   # 币种→汇率缓存，进程内只请求一次 er-api，避免每个商品重复拉取
+_exchange_rates_cache = {}   # 币种→汇率缓存，进程内复用
 _shop_currency_cache = {}    # 店铺 origin→币种缓存，同一店铺只识别一次币种
+_exchange_rates_cached_at = 0.0
+_exchange_rates_cache_loaded = False
+_exchange_rates_last_attempt_at = 0.0
+_EXCHANGE_RATES_TTL_SECONDS = 24 * 60 * 60
+_EXCHANGE_RATES_RETRY_SECONDS = 5 * 60
+
+
+def _default_exchange_rates_cache_path():
+    # 汇率缓存属于本机用户数据，不放入仓库或当前项目输出目录。
+    local_app_data = os.environ.get('LOCALAPPDATA')
+    base_dir = Path(local_app_data) if local_app_data else Path.home() / '.cache'
+    return base_dir / 'AnglanWorkbench' / 'exchange_rates.json'
+
+
+_exchange_rates_cache_path = _default_exchange_rates_cache_path()
+
+
+def _valid_exchange_rates(rates):
+    if not isinstance(rates, dict):
+        return {}
+    valid = {}
+    for currency, value in rates.items():
+        code = str(currency).strip().upper()
+        try:
+            rate = float(value)
+        except (TypeError, ValueError):
+            continue
+        if len(code) == 3 and code.isascii() and code.isalpha() and rate > 0 and math.isfinite(rate):
+            valid[code] = rate
+    return valid
+
+
+def _read_exchange_rates_cache(now):
+    try:
+        payload = json.loads(_exchange_rates_cache_path.read_text(encoding='utf-8'))
+        fetched_at = float(payload.get('fetched_at', 0))
+        age = now - fetched_at
+        rates = _valid_exchange_rates(payload.get('rates'))
+        if rates and 0 <= age < _EXCHANGE_RATES_TTL_SECONDS:
+            return rates, fetched_at
+    except (OSError, ValueError, TypeError, AttributeError, json.JSONDecodeError):
+        pass
+    return {}, 0.0
+
+
+def _write_exchange_rates_cache(rates, fetched_at):
+    temp_path = None
+    try:
+        _exchange_rates_cache_path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+                mode='w', encoding='utf-8', dir=_exchange_rates_cache_path.parent,
+                prefix='exchange_rates_', suffix='.tmp', delete=False) as temp_file:
+            temp_path = Path(temp_file.name)
+            json.dump({'fetched_at': fetched_at, 'rates': rates}, temp_file)
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
+        os.replace(temp_path, _exchange_rates_cache_path)
+    except OSError:
+        # 缓存只是加速项；本次采集仍可用刚取得的内存汇率继续处理。
+        if temp_path is not None:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def to_shopify_json_url(url):
@@ -148,9 +215,26 @@ def detect_shop_currency_http(url):
 
 
 def fetch_exchange_rates():
-    # 拉取一次以 USD 为基准的汇率表并缓存，供价格换算复用；失败返回空表触发回退。
-    if _exchange_rates_cache:  # 已有缓存直接返回，进程内只请求一次
+    # 优先复用本地 24 小时缓存；同一进程内也只保留一份汇率表。
+    global _exchange_rates_cache_loaded, _exchange_rates_cached_at, _exchange_rates_last_attempt_at
+    now = time.time()
+    if not _exchange_rates_cache_loaded:
+        cached_rates, cached_at = _read_exchange_rates_cache(now)
+        _exchange_rates_cache.update(cached_rates)
+        _exchange_rates_cached_at = cached_at
+        _exchange_rates_cache_loaded = True
+        if cached_rates:
+            print(f"[汇率] 使用本地缓存 ({len(cached_rates)} 种货币)")
+    if _exchange_rates_cache:
+        cache_age = now - _exchange_rates_cached_at
+        if 0 <= cache_age < _EXCHANGE_RATES_TTL_SECONDS:
+            return _exchange_rates_cache
+        _exchange_rates_cache.clear()
+        _exchange_rates_cached_at = 0.0
+    # 网络暂时失败时，避免每个非 USD 商品都重复请求。
+    if now - _exchange_rates_last_attempt_at < _EXCHANGE_RATES_RETRY_SECONDS:
         return _exchange_rates_cache
+    _exchange_rates_last_attempt_at = now
     try:
         req = urllib.request.Request("https://open.er-api.com/v6/latest/USD", headers={"User-Agent": "Mozilla/5.0"})
         context = ssl.create_default_context()
@@ -158,9 +242,12 @@ def fetch_exchange_rates():
             context.load_verify_locations(cafile=certifi.where())
         with urllib.request.urlopen(req, timeout=10, context=context) as response:
             data = json.loads(response.read().decode())
-        rates = data.get("rates") or {}
+        rates = _valid_exchange_rates(data.get("rates"))
         if rates:
-            _exchange_rates_cache.update(rates)  # 填入缓存，后续换算不再联网
+            _exchange_rates_cache.clear()
+            _exchange_rates_cache.update(rates)
+            _exchange_rates_cached_at = now
+            _write_exchange_rates_cache(rates, now)
             print(f"[汇率] 已获取 {len(rates)} 种货币")
     except Exception as exc:
         print(f"[汇率] 获取失败: {exc}")  # 取汇率失败：后续换算将保留原币种

@@ -64,19 +64,22 @@ def style_image_urls(styles):
     return seen
 
 
-# 汇总形态的 src_links：颜色图全留，再从全部图里补最多 4 张不重复主图（这就是「后面四张」的出处）。
-def _build_src_links(images, style_images):
+# 汇总形态的 src_links：颜色图全留，再补充去重后的相册主图。
+def _build_src_links(images, style_images, gallery_image_limit=4):
     """合并已完成尺寸格式化的图集和款式图。"""
     style_images = list(dict.fromkeys(src for src in style_images if src))
     style_set = set(style_images)
-    # 4 张是人工核对与页面展示够用量的折中；已在颜色图里出现过的不重复计入这 4 张
-    main_images = [src for src in images if src and src not in style_set][:4]
+    try:
+        gallery_image_limit = max(0, int(gallery_image_limit))
+    except (TypeError, ValueError):
+        gallery_image_limit = 4
+    main_images = [src for src in images if src and src not in style_set][:gallery_image_limit]
     return "#".join(style_images + main_images)
 
 
 # 十字段行的生成入口：一行 = 一个（被切块后的）商品，列顺序见 config.CSV_FIELDS。
 # 标题与链接直接取自汇总记录自身的 fennei / url，不需要调用方再传一份。
-def parse_product(data, selected_options=None, option_limits=None):
+def parse_product(data, selected_options=None, option_limits=None, gallery_image_limit=4):
     product = clean_product_option_values(data.get("product", data))
     options, prices, entries = _selected_product_combinations(
         product, selected_options, skip_options=config.SKIP_OPTIONS, option_limits=option_limits)
@@ -100,12 +103,15 @@ def parse_product(data, selected_options=None, option_limits=None):
         raise StylesTooLongError(f"styles1 长度 {len(styles)} 超过上限 {config.MAX_STYLES_LENGTH}")
     # 十字段来源：title 用分类名（fennei）、name 用商品标题；styles2/styles3 固定留空给后续流程；
     # 汇总文件的 body_html 已在阶段 02 清洗过，所以直接传给 details
+    # 该设置只控制没有输出 Color 维度的商品；带颜色商品仍最多补四张相册图。
+    has_color = any(is_color_name(option.get("name")) for option in options)
+    gallery_limit = 4 if has_color else gallery_image_limit
     return {
         "title": product["fennei"], "name": product["title"],
         "price1": prices["price"], "price2": prices["compare_at_price"],
         "styles1": styles, "styles2": "", "styles3": "",
         "src_links": _build_src_links([format_image_url(src) for src in product["images"]],
-                                      [entry["image_url"] for entry in entries]),
+                                      [entry["image_url"] for entry in entries], gallery_limit),
         "link-href": normalize_url_dashes(product["url"]), "details": product["body_html"],
         "md5": product.get("md5", ""),
     }

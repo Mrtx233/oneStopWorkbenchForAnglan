@@ -8,15 +8,18 @@ import product_parser  # 30_product_parser，所有解析能力都从这里来
 # 颜色判定直接复用 parser 的实现，避免「哪里算颜色」在两处口径不一致
 is_color_name = product_parser.is_color_name
 # getattr 兜底：30 是靠 exec 拼出来的模块，万一没导出该常量也不至于 import 阶段就崩
-COLOR_NAMES = getattr(product_parser, "COLOR_NAMES", {"color", "colour", "colors", "colours"})
+COLOR_NAMES = getattr(product_parser, "COLOR_NAMES", {"color", "colour", "colors", "colours", "颜色"})
+SIZE_NAMES = getattr(product_parser, "SIZE_NAMES", {"size", "sizes", "尺寸"})
 
 
-# 把用户勾选的选项名归一成小写集合，并补全颜色的各种写法。
+# 把用户勾选的选项名归一成小写集合，并补全颜色/尺码的各种写法。
 def expand_selected_names(selected_options):
     selected = {str(name).strip().casefold() for name in (selected_options or [])}
-    # 勾了任一颜色别名就等于勾了全部：界面可能写 Color，数据里可能是 colour/colors
+    # 勾了任一别名就等于勾了该维度的全部写法。
     if selected & COLOR_NAMES:
         selected |= COLOR_NAMES
+    if selected & SIZE_NAMES:
+        selected |= SIZE_NAMES
     return selected
 
 
@@ -24,7 +27,7 @@ def select_option_names(selected_options, observed_names, include_other=False):
     """其他维度按实际明细加入，Color/Size 始终服从各自勾选，不被开关重新选中。"""
     selected = list(selected_options)
     if include_other:
-        primary = {'color', 'colour', 'colors', 'colours', 'size', 'sizes'}
+        primary = COLOR_NAMES | SIZE_NAMES
         chosen = {str(name).strip().casefold() for name in selected}
         for name in observed_names:
             key = str(name).strip().casefold()
@@ -102,12 +105,12 @@ def color_product_md5(product, chunk):
     return hashlib.md5(payload.encode("utf-8")).hexdigest()
 
 
-# 返回 True 表示 src_links 只留本块颜色图，丢掉相册里的其它（后面四张）主图。
+# 返回 True 表示 src_links 只留本块颜色图，丢掉所有相册补图。
 def drop_gallery_images(selected_options, options, split_by_color, color_images_only):
-    # 一旦按颜色拆行就必须丢：不丢的话同一商品的每张表行都会带着全部主图，颜色与图对不上
+    # 一旦按颜色拆成多行就必须丢：不丢的话每行都会带着全部主图，颜色与图对不上
     if split_by_color:
         return True
-    # 没勾「拆色时不要后面四张」→ 维持旧行为，颜色图之后还补主图
+    # 未启用仅颜色图模式时，颜色图之后仍按补图数量添加相册主图
     if not color_images_only:
         return False
     has_color = any(is_color_name(opt.get("name")) for opt in options)
@@ -121,7 +124,7 @@ def drop_gallery_images(selected_options, options, split_by_color, color_images_
 
 # 十字段行的生成入口：颜色切块 → 逐块解析 → 需要时把 src_links 收成本块颜色图。
 def parse_product_rows(data, selected_options=None, option_limits=None, color_images_only=False,
-                       output_products=None):
+                       output_products=None, gallery_image_limit=4):
     product = data.get("product", data)
     # SKIP_OPTIONS 在这里生效：先把「ships from」之类的非款式列整列剔掉再参与拆行
     options = product_parser.get_sorted_options(product, skip_options=config.SKIP_OPTIONS)
@@ -138,6 +141,7 @@ def parse_product_rows(data, selected_options=None, option_limits=None, color_im
             sliced["md5"] = color_product_md5(product, chunk)
         row = product_parser.parse_product(
             {"product": sliced}, selected_options=selected_options, option_limits=None,
+            gallery_image_limit=gallery_image_limit,
         )
         # option_limits 传 None：上限已经体现在切块上，再传进去会被二次截断，块内数量就对不上
         if drop_gallery:

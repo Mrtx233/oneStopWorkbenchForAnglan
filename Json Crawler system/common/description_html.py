@@ -4,7 +4,7 @@ from html import escape
 from html.parser import HTMLParser
 
 
-# 清空规则：元素子树文本命中任一条，就清空该元素内容（保留标签本身）；
+# 清理规则：元素子树文本命中任一条，就移除该元素；
 # 不在任何元素内的裸文本命中则直接删除该行。
 # - made in：只认元素开头（允许前置符号与空白），如 <li>• Made in Poland</li>；
 #   句中的 “This dress is made in Italy” 属于正常描述，不删。
@@ -208,15 +208,47 @@ class CleanBodyHtmlParser(HTMLParser):
         # 子树文本先只累积到最内层，闭合后由 _absorb 上抛给祖先
         return self.frames[-1].text if self.frames else None
 
+    @staticmethod
+    def _normalize_text_data(data):
+        # 商品描述常以 pretty-print HTML 保存：标签之间及标签内部会有大量换行、Tab 和缩进。
+        # 纯空白节点直接丢弃；含换行/Tab 的格式化空白压成一个普通空格并去掉两端缩进。
+        if not data or not data.strip():
+            return ''
+        if any(char in data for char in ('\r', '\n', '\t')):
+            return re.sub(r'\s+', ' ', data).strip()
+        # 普通单个空格可能是标签间的有效语义空格，保留它；连续空格按排版缩进压成一个。
+        normalized = re.sub(r'[^\S\r\n\t]+', ' ', data)
+        if re.match(r'^[ ]{2,}', data):
+            normalized = normalized.lstrip(' ')
+        if re.search(r'[ ]{2,}$', data):
+            normalized = normalized.rstrip(' ')
+        return normalized
+
+    def _append_empty_frame(self, frame):
+        # 表格单元格即使无内容也要保留，避免改变列位置。
+        self._current_parts().extend(frame.parts[:1])
+        if frame.closed:
+            self._current_parts().append(f'</{frame.tag}>')
+
     def _absorb(self, frame):
-        # 命中规则或整段内容都被清空：只保留元素标签，内容不保留、文本也不上抛，
-        # 避免外层被连带清空。表格结构容器（colgroup/tr 等）无正文也照常保留骨架。
+        # 表格结构容器无正文也保留；普通空标签与被文字规则清空的标签整体移除。
         is_table_structure = frame.tag in self.table_structure_tags
-        if not is_table_structure and (self._should_drop(frame) or not frame.has_payload):
-            kept = list(frame.parts[:1])
-            if frame.closed:
-                kept.append(f'</{frame.tag}>')
-            self._current_parts().extend(kept)
+        is_table_cell = self.table_depth > 0 and frame.tag in {'td', 'th'}
+        if is_table_structure:
+            self._current_parts().extend(frame.parts)
+            if self.frames:
+                self.frames[-1].has_payload = True
+            text = self._current_text()
+            if text is not None:
+                text.extend(frame.text)
+            return
+        if self._should_drop(frame):
+            if is_table_cell:
+                self._append_empty_frame(frame)
+            return
+        if not frame.has_payload:
+            if is_table_cell:
+                self._append_empty_frame(frame)
             return
         self._current_parts().extend(frame.parts)
         if self.frames:
@@ -235,7 +267,7 @@ class CleanBodyHtmlParser(HTMLParser):
 
     @classmethod
     def _should_drop(cls, frame):
-        # 命中即清空元素内容（保留标签）；判据都用元素原文，避免被句子级删除影响
+        # 命中即移除整个元素；判据都用元素原文，避免被句子级删除影响
         if not frame.text:
             return False
         text = re.sub(r'\s+', ' ', ' '.join(frame.text)).strip()
@@ -357,6 +389,17 @@ class CleanBodyHtmlParser(HTMLParser):
                 if not any(line.strip() for line in kept):
                     return
                 data = '\n'.join(kept)
+            # 根层换行可能既是排版缩进，也可能分隔多行裸文本。按行压缩，
+            # 避免先把 SKU 行与有效行合并后一起删除。
+            normalized_lines = [self._normalize_text_data(line) for line in data.splitlines()]
+            normalized_lines = [line for line in normalized_lines if line]
+            if not normalized_lines:
+                return
+            data = '\n'.join(normalized_lines)
+        else:
+            data = self._normalize_text_data(data)
+            if not data:
+                return
         self._current_parts().append(escape(data, quote=False))
         if data.strip() and self.frames:  # 纯换行/空白不算内容
             self.frames[-1].has_payload = True
@@ -365,8 +408,6 @@ class CleanBodyHtmlParser(HTMLParser):
         # 未闭合元素按原样展开（不补结束标签），保持与改造前一致的输出
         while self.frames:
             self._absorb(self.frames.pop())
-        # 不再清理空成对标签：清空规则留下的 <li></li>、<p></p> 要保留，
-        # 否则二次清洗会把它们当成空壳删掉，导致结果不幂等。
         return ''.join(self.parts).strip()
 
 def clean_body_html(body_html, *, keep_images=False, keep_tables=False):

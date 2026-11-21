@@ -4,9 +4,9 @@ import re
 
 def _dimension(name):
     text = str(name or '').strip().casefold()
-    if text in {'color', 'colour', 'colors', 'colours'}:
+    if text in {'color', 'colour', 'colors', 'colours', '颜色'}:
         return 'Color'
-    if text in {'size', 'sizes'}:
+    if text in {'size', 'sizes', '尺寸'}:
         return 'Size'
     return None
 

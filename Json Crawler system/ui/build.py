@@ -61,7 +61,11 @@ class CrawlerBuild:
         self.include_other_options = tk.BooleanVar(
             value=saved_settings.get('include_other_options', False) is True,
         )  # 阶段 03：在 Color/Size 勾选之外加入其他维度
-        self.color_images_only = tk.BooleanVar(value=False)        # 「拆色时不要后面四张」：只留本件颜色图
+        self.color_images_only = tk.BooleanVar(value=False)        # 有颜色维度时只保留本块颜色图
+        saved_gallery_limit = str(saved_settings.get('gallery_image_limit', 4)).strip()
+        if not saved_gallery_limit.isdecimal():
+            saved_gallery_limit = '4'
+        self.gallery_image_limit = tk.StringVar(value=saved_gallery_limit)  # 无 Color 维度时的相册补图数
         self.option_limits = {'Color': tk.StringVar(value='')}     # Color 每件上限，留空 = 不限
         # 阶段三切分后置动作：两种模式（均分 N 份 / 按 title 各自成文件）+ 份数 + 价格列。
         self.split_mode = tk.StringVar(value='parts')              # 切分模式：parts=均分 / each=按title分类
@@ -82,7 +86,7 @@ class CrawlerBuild:
                     self.window_lower, self.window_upper,
                     self.make_raw_prices, self.match_prices,
                     self.color, self.size, self.include_other_options,
-                    self.color_images_only, *self.option_limits.values(),
+                    self.color_images_only, self.gallery_image_limit, *self.option_limits.values(),
                     self.split_mode, self.split_parts, self.split_price_col, self.split_overwrite):
             var.trace_add('write', lambda *_: self.on_setting_changed())
         self.refresh_paths()               # 初次同步一次路径相关显示状态

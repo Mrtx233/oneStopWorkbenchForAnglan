@@ -27,6 +27,17 @@ def run(settings, stop, emit):
     # 上限在这里先校验：输入非法要在工作台刚启动时就报错，而不是跑到一半
     limits = product_parser.normalize_option_limits(settings.get('option_limits'))
     color_images_only = bool(settings.get('color_images_only'))
+    gallery_image_limit = settings.get('gallery_image_limit', 4)
+    if isinstance(gallery_image_limit, bool):
+        raise ValueError('无颜色补图数必须是 0 或更大的整数')
+    if isinstance(gallery_image_limit, int):
+        pass
+    elif isinstance(gallery_image_limit, str) and gallery_image_limit.strip().isdecimal():
+        gallery_image_limit = int(gallery_image_limit.strip())
+    else:
+        raise ValueError('无颜色补图数必须是 0 或更大的整数')
+    if gallery_image_limit < 0:
+        raise ValueError('无颜色补图数必须是 0 或更大的整数')
     if limits:
         print(f'属性上限（每行最多 N 个，多余拆行）：{limits}', flush=True)
     if color_images_only:
@@ -59,7 +70,7 @@ def run(settings, stop, emit):
             rows, skipped = analyzer.build_ten_field_rows(
                 path, selected_options=selected, option_limits=limits,
                 color_images_only=color_images_only, failures=failures,
-                output_products=products)
+                output_products=products, gallery_image_limit=gallery_image_limit)
             if not rows:
                 print(f'跳过空文件：{path}', flush=True)
                 continue

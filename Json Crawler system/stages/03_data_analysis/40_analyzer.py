@@ -107,7 +107,8 @@ def expand_cartesian(data_dir, selected_options, option_limits=None, row_limit=2
 
 # 十字段行的批量入口：按域名把汇总 JSON 里的商品全部转成 CSV_FIELDS 那十列。
 def build_ten_field_rows(data_dir, selected_options=None, option_limits=None,
-                         color_images_only=False, failures=None, output_products=None):
+                         color_images_only=False, failures=None, output_products=None,
+                         gallery_image_limit=4):
     rows, invalid = [], 0
     for f, prod in iter_products(data_dir):
         url = prod['url']  # 汇总记录自带链接，仅用于失败清单里指名道姓
@@ -115,7 +116,7 @@ def build_ten_field_rows(data_dir, selected_options=None, option_limits=None,
             rows.extend(option_split.parse_product_rows(
                 {'product': prod}, selected_options=selected_options,
                 option_limits=option_limits, color_images_only=color_images_only,
-                output_products=output_products))
+                output_products=output_products, gallery_image_limit=gallery_image_limit))
         except product_parser.InvalidProductError as exc:
             # 无效币种、价格或超长款式：记录原因并继续其它商品。
             invalid += 1

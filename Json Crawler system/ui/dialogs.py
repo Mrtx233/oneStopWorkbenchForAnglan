@@ -129,6 +129,10 @@ class CrawlerDialogs:
             if not value.isdecimal() or int(value) < 1:
                 raise ValueError('Color 上限必须为正整数，或留空')
             option_limits['Color'] = int(value)
+        gallery_limit_text = self.gallery_image_limit.get().strip()
+        if gallery_limit_text and not gallery_limit_text.isdecimal():
+            raise ValueError('无颜色补图数必须是 0 或更大的整数')
+        gallery_image_limit = int(gallery_limit_text) if gallery_limit_text else 4
         # 尺码梯度定价保留价差上限与候选窗口两个参数，交由后端校验。
         pricing = load_step(Path(__file__).resolve().parents[1] /
                             'stages/04_price_export/00_pricing_config.py')
@@ -154,7 +158,8 @@ class CrawlerDialogs:
             'make_raw_prices': bool(self.make_raw_prices.get()),   # 阶段 04 是否生成原价表
             'match_prices': bool(self.match_prices.get()),         # 阶段 04 是否做价格匹配
             'option_limits': option_limits,                        # 阶段 03 每件颜色上限
-            'color_images_only': bool(self.color_images_only.get()),   # 「拆色时不要后面四张」，驱动 option_split 丢相册
+            'color_images_only': bool(self.color_images_only.get()),   # 有颜色维度时只保留本块颜色图
+            'gallery_image_limit': gallery_image_limit,            # 无 Color 维度时最多补入的相册图数
             'options': [name for name, var in [('Color', self.color), ('Size', self.size)] if var.get()],  # 勾选要写入的维度
             'split_mode': self.split_mode.get(),                  # 切分模式：parts / each
             'split_parts': self.split_parts.get().strip(),        # 均分份数，切分阶段校验
@@ -169,8 +174,9 @@ class CrawlerDialogs:
         proxy = PROXY_SERVER
         skip = settings.get('skip_image_positions') or []
         skip_text = ','.join(str(n) for n in skip) if skip else '不跳'
-        # gallery：勾选 color_images_only 显示「仅色图」，否则「可补相册」，对应下游拆色补图策略。
-        gallery = '仅色图' if settings.get('color_images_only') else '可补相册'
+        # 无 Color 维度时按本轮上限补图；有 Color 维度且勾选开关时只保留颜色图。
+        gallery = ('拆色仅色图' if settings.get('color_images_only') else
+                   f'无色补{settings.get("gallery_image_limit", 4)}张')
         # flows：本轮阶段 04 实际要跑的流程，两个都没勾时只剩合并与导出。
         flows = '+'.join(name for name, on in (('原价', settings.get('make_raw_prices', False)),
                                                ('匹配', settings.get('match_prices', True))) if on) or '仅导出'
@@ -194,5 +200,6 @@ class CrawlerDialogs:
             'keep_description_images': settings.get('keep_description_images', False),
             'keep_description_tables': settings.get('keep_description_tables', False),
             'include_other_options': settings.get('include_other_options', False),
+            'gallery_image_limit': settings.get('gallery_image_limit', 4),
             'browser_path': settings.get('browser_path') or '',
         })

@@ -248,7 +248,12 @@ class CrawlerPages:
         row.pack(fill='x', pady=(5, 0))
         ttk.Checkbutton(row, text='Size', variable=self.size).pack(side='left', padx=(0, 18))
         ttk.Checkbutton(row, text='其他维度参与组合', variable=self.include_other_options).pack(side='left')
-        ttk.Checkbutton(options, text='拆色时不要后面四张', variable=self.color_images_only).pack(anchor='w', pady=(3, 8))
+        row = ttk.Frame(options)
+        row.pack(fill='x', pady=(8, 3))
+        ttk.Label(row, text='无颜色补图数', style='Muted.TLabel').pack(side='left')
+        ttk.Entry(row, textvariable=self.gallery_image_limit, width=5).pack(side='left', padx=(8, 6))
+        ttk.Label(row, text='张 · 默认4，可填0', style='Muted.TLabel').pack(side='left')
+        ttk.Checkbutton(options, text='有颜色维度时只保留颜色图', variable=self.color_images_only).pack(anchor='w', pady=(2, 8))
         actions = ttk.Frame(options)
         actions.pack(fill='x')
         for text, callback, style in (

@@ -18,8 +18,9 @@ from common import styles_codec
 from common.option_values import clean_product_option_values
 from url_utils import normalize_url_dashes
 
-# 这里只认 color/colour 两种写法（Shopify 常见列名）；colors/colours 的扩展在 option_split 的勾选侧做
-COLOR_NAMES = {"color", "colour"}
+# 颜色/尺码别名与阶段二保持一致；旧数据和中文店铺列名都能在阶段三继续识别。
+COLOR_NAMES = {"color", "colour", "colors", "colours", "颜色"}
+SIZE_NAMES = {"size", "sizes", "尺寸"}
 
 
 # 判断是否为阶段 02 汇总 JSON 的九字段形态；入口守卫与拆行都靠它认定输入合法。
@@ -33,6 +34,19 @@ def is_color_name(name):
     return str(name or "").strip().casefold() in COLOR_NAMES
 
 
+def is_size_name(name):
+    return str(name or "").strip().casefold() in SIZE_NAMES
+
+
+def canonical_option_name(name):
+    text = str(name or "").strip()
+    if is_color_name(text):
+        return "Color"
+    if is_size_name(text):
+        return "Size"
+    return text
+
+
 # 汇总形态的 options（{列名: 取值或 颜色→图}）转成统一的 [{name, values}] 列表。
 def analysis_options(product, selected_options=None, skip_options=None):
     product = clean_product_option_values(product)
@@ -42,14 +56,19 @@ def analysis_options(product, selected_options=None, skip_options=None):
 def _analysis_options(product, selected_options=None, skip_options=None):
     """内部入口：调用方已经清洗选项及颜色键。"""
     options = []
-    selected = None if selected_options is None else {n.casefold() for n in selected_options}
-    # 勾了 color 就把 colour 也放行，否则同一维度会因为拼写不同被漏掉
-    if selected is not None and "color" in selected:
-        selected.add("colour")
+    selected = None if selected_options is None else {
+        str(name or "").strip().casefold() for name in selected_options
+    }
+    # 勾选任一别名就放行该维度的全部写法，避免同一维度因语言或复数不同被漏掉。
+    if selected is not None:
+        if selected & COLOR_NAMES:
+            selected |= COLOR_NAMES
+        if selected & SIZE_NAMES:
+            selected |= SIZE_NAMES
     skip = [n.casefold() for n in (skip_options or [])]
     for entry in product.get("options", []):
         for name, values in entry.items():
-            output_name = "Color" if is_color_name(name) else name
+            output_name = canonical_option_name(name)
             if str(name or "").strip().casefold() == "type" and isinstance(values, list) and len(values) > 1:
                 output_name = "Style"
             if selected is not None and output_name.casefold() not in selected:
@@ -82,7 +101,7 @@ def normalize_option_limits(option_limits=None):
             continue  # 留空表示该列不限，不参与拆行
         if not text.isdecimal() or int(text) < 1:
             raise ValueError(f'{name} 上限必须为正整数，或留空')
-        limits[str(name).strip().casefold()] = int(text)
+        limits[canonical_option_name(name).casefold()] = int(text)
     return limits
 
 

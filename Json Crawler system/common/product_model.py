@@ -37,8 +37,8 @@ SIZE_MODES = ("standard", "original")
 DESCRIPTION_IMAGE_MODES = ("keep", "remove")
 DESCRIPTION_TABLE_MODES = ("keep", "remove")
 
-COLOR_NAMES = {"color", "colour", "colors", "colours"}
-SIZE_NAMES = {"size", "sizes"}
+COLOR_NAMES = {"color", "colour", "colors", "colours", "颜色"}
+SIZE_NAMES = {"size", "sizes", "尺寸"}
 
 
 class ProductDataError(ValueError):
@@ -46,11 +46,12 @@ class ProductDataError(ValueError):
 
 
 def is_color_name(name) -> bool:
-    # 颜色维度判定：忽略大小写与首尾空白，兼容 colour/colors/colours
+    # 颜色维度判定：忽略大小写与首尾空白，兼容英文复数、英式拼写和中文名称。
     return str(name or "").strip().casefold() in COLOR_NAMES
 
 
 def is_size_name(name) -> bool:
+    # 尺码维度判定：兼容英文复数和中文名称。
     return str(name or "").strip().casefold() in SIZE_NAMES
 
 
