@@ -1,8 +1,6 @@
 """原始 Shopify 商品转为九字段 JSON，描述在落盘前完成统一清洗。"""
 
 from collections import Counter
-import re
-from common.product_text import clean_product_title
 from common.price_fallback import fill_missing_prices
 from common.option_values import clean_product_option_values
 from common.product_model import (
@@ -15,30 +13,9 @@ import network_utils
 # 这里按原函数名导入，阶段内调用方式与导入路径保持不变。
 
 
-# 根据商品名称识别鞋裤；英语单数按词匹配，复数兼容标题清洗后连字符被删除的写法。
-ORIGINAL_SIZE_TITLE_PATTERN = re.compile(
-    r'\b(?:shoe|shoes|sneaker|sneakers|boot|boots|sandal|sandals|slipper|slippers|'
-    r'loafer|loafers|trainer|trainers|footwear|heels|flats|pant|pants|trouser|trousers|'
-    r'jean|jeans|legging|leggings|jogger|joggers|sweatpant|sweatpants|chino|chinos|shorts)\b'
-)
-ORIGINAL_SIZE_TITLE_SUFFIXES = (
-    'shoes', 'sneakers', 'boots', 'sandals', 'slippers', 'loafers', 'trainers',
-    'footwear', 'heels', 'flats', 'pants', 'trousers', 'jeans', 'leggings',
-    'joggers', 'sweatpants', 'chinos', 'shorts',
-)
-
-
 def effective_size_mode(title, use_standard_sizes=True):
-    """标准尺码开关开启时，名称识别为鞋裤的商品仍使用网站原始尺码。"""
-    if not use_standard_sizes:
-        return 'original'
-    # 与落盘标题使用相同清洗规则，避免首次采集和后续续跑的判定不一致。
-    text = clean_product_title(title).casefold()
-    chinese_match = any(keyword in text for keyword in ('鞋', '裤', '褲'))
-    english_match = (ORIGINAL_SIZE_TITLE_PATTERN.search(text) is not None
-                     or any(word.endswith(ORIGINAL_SIZE_TITLE_SUFFIXES)
-                            for word in re.findall(r'[a-z]+', text)))
-    return 'original' if chinese_match or english_match else 'standard'
+    """模式完全由开关决定；保留 title 参数以兼容已有调用。"""
+    return 'standard' if use_standard_sizes else 'original'
 
 
 def has_missing_size_details(row):
@@ -93,8 +70,9 @@ def needs_description_refresh(row, keep_description_images=False, keep_descripti
                 and row.get('description_table_mode', 'remove') != 'keep'))
 
 
-# 整组尺码无法全部提取时，按清洗后的数量回退到标准序列。
+# 标准模式直接按清洗、去重后的尺码数量套用标准序列。
 SIZE_VALUES_BY_COUNT = {
+    1: ("One Size",),
     2: ("S", "M"),
     3: ("S", "M", "L"),
     4: ("S", "M", "L", "XL"),
@@ -106,38 +84,10 @@ SIZE_VALUES_BY_COUNT = {
 }
 
 
-# 常见独立尺码保留原写法；提取时只匹配完整词，避免从 UK、Small 等词中误取字母。
-LETTER_SIZE_TOKEN = (
-    r"(?:X+[ -]?(?:SMALL|LARGE)|EXTRA[ -]+(?:SMALL|LARGE)|"
-    r"SMALL|MEDIUM|LARGE|(?:[2-9]|10)X[SL]|X+[SL]|[SML]|"
-    r"ONE[ -]?SIZE|FREE[ -]?SIZE|ONESIZE|ONE|OS)"
-)
-LETTER_SIZE_PATTERN = re.compile(LETTER_SIZE_TOKEN, re.IGNORECASE)
-EMBEDDED_SIZE_PATTERN = re.compile(
-    r"(?<!\w)" + LETTER_SIZE_TOKEN + r"(?!\w)", re.IGNORECASE,
-)
-NUMERIC_SIZE_PATTERN = re.compile(r"\d+(?:\.\d+)?")
-
-
 def standardize_size_values(size_values):
-    """常规尺码原样保留；复合值全部明确提取成功才采用，否则整组按数量回退。"""
+    """直接按尺码数量替换整组；数量不在预设表时保留原值。"""
     original = list(size_values)
-    texts = [str(value).strip() if value is not None else "" for value in original]
-    if all(LETTER_SIZE_PATTERN.fullmatch(text) or NUMERIC_SIZE_PATTERN.fullmatch(text)
-           for text in texts):
-        return original
-
-    extracted = []
-    for value, text in zip(original, texts):
-        if LETTER_SIZE_PATTERN.fullmatch(text):
-            extracted.append(value)
-            continue
-        matches = list(EMBEDDED_SIZE_PATTERN.finditer(text))
-        # S/M 等多尺码写法有歧义，不能随意选择其中一个；数字也不能凭空推断字母码。
-        if len(matches) != 1:
-            return list(SIZE_VALUES_BY_COUNT.get(len(original), original))
-        extracted.append(matches[0].group())
-    return extracted
+    return list(SIZE_VALUES_BY_COUNT.get(len(original), original))
 
 
 def skip_image_indexes(count, positions):
@@ -212,7 +162,7 @@ def parse_product_object(data, *, url, title, fennei, skip_positions=None, curre
         dimensions.append(OptionDimension("Color", colors))  # Color 维度：颜色名→图片 URL
     if "Size" in by_name:
         size_values = by_name["Size"]
-        # 普通商品先保留常规尺码或整组提取，失败才按数量回退；鞋裤仍保留原值。
+        # 开启后所有商品直接按数量套标准序列，不按标题跳过。
         values = standardize_size_values(size_values) if size_mode == 'standard' else size_values
         dimensions.append(OptionDimension("Size", list(values)))
     # 数量以外也保留其他选项的真实取值，阶段三通过开关决定是否参与组合。

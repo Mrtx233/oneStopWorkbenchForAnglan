@@ -11,8 +11,11 @@ import config
 import file_utils
 import logger
 import network_utils
-from product_analysis import needs_description_refresh, needs_option_refresh, parse_product_object
-from common.product_model import Product, ProductDataError
+from product_analysis import (
+    needs_description_refresh, needs_option_refresh,
+    parse_product_object, standardize_size_values,
+)
+from common.product_model import Product, ProductDataError, is_size_name
 
 DELAY = config.DELAY                            # 商品间隔，见 config
 TRANSIENT_RETRY_DELAY = config.TRANSIENT_RETRY_DELAY  # 瞬时失败重试等待秒数，见 config
@@ -137,6 +140,14 @@ class ScraperRunner:
                             duplicate_count += 1
                             continue
                         original_rows[key] = row
+                        # 开启后直接转换已有明细，旧 original 标记和商品标题均不绕过。
+                        # 关闭后需要恢复网站原值，仍由下方模式检查触发补采。
+                        if self.use_standard_sizes:
+                            for dimension in product.options:
+                                if is_size_name(dimension.name) and isinstance(dimension.values, list):
+                                    dimension.values = standardize_size_values(dimension.values)
+                                    product.option_counts[dimension.name] = dimension.count
+                                    product.size_mode = 'standard'
                         saved[key] = product
                         committed_rows[key] = row
                         normalized = product.to_dict()
