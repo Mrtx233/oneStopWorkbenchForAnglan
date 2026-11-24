@@ -19,6 +19,7 @@ STAGES = {
     3: '03_data_analysis',
     4: '04_price_export',
     5: '03_1_split',
+    6: '04_1_image_downloader',
 }
 
 

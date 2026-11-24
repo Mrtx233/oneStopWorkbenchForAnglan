@@ -51,6 +51,33 @@ class CrawlerDialogs:
         # 进入商品页(2)时自动刷新域名文件列表，省去手点「刷新列表」。
         if index == 2:
             self.refresh_files()
+        elif index == 5:
+            self.refresh_wp_csv()
+
+    def refresh_wp_csv(self, force_latest=False):
+        project = Path(self.project.get()).expanduser()
+        candidates = []
+        for folder in (project / '价格匹配', project / '原价', project):
+            if folder.is_dir():
+                candidates.extend(path for path in folder.glob('wp-*.csv')
+                                  if path.is_file() and '-imageOK-' not in path.stem)
+        candidates = list(dict.fromkeys(candidates))
+        if not candidates:
+            if not self.image_csv.get().strip():
+                self.status.set('未找到 WP 导出 CSV；可手动选择文件')
+            return
+        latest = max(candidates, key=lambda path: path.stat().st_mtime)
+        selected = Path(self.image_csv.get()).expanduser() if self.image_csv.get().strip() else None
+        if force_latest or selected is None or not selected.is_file():
+            self.image_csv.set(str(latest.resolve()))
+        self.status.set(f'找到 {len(candidates)} 个 WP 导出文件，最新：{latest.name}')
+
+    def browse_image_csv(self):
+        path = filedialog.askopenfilename(
+            initialdir=self.project.get(), filetypes=[('WP CSV', 'wp-*.csv'), ('CSV', '*.csv')],
+        )
+        if path:
+            self.image_csv.set(path)
 
     def refresh_paths(self):
         # 参数一变就清空可能过期的预览与统计，避免用户误读上一轮结果。
@@ -137,6 +164,9 @@ class CrawlerDialogs:
         if gallery_limit_text and not gallery_limit_text.isdecimal():
             raise ValueError('无颜色补图数必须是 0 或更大的整数')
         gallery_image_limit = int(gallery_limit_text) if gallery_limit_text else 4
+        image_csv = self.image_csv.get().strip()
+        image_wp_site = self.image_wp_site.get().strip().rstrip('/')
+        image_workers_text = self.image_workers.get().strip()
         # 尺码梯度定价保留价差上限与候选窗口两个参数，交由后端校验。
         pricing = load_step(Path(__file__).resolve().parents[1] /
                             'stages/04_price_export/00_pricing_config.py')
@@ -169,6 +199,9 @@ class CrawlerDialogs:
             'split_parts': self.split_parts.get().strip(),        # 均分份数，切分阶段校验
             'split_price_col': self.split_price_col.get().strip(),  # 均分排序价格列（price1/price2，空=原序）
             'split_overwrite': bool(self.split_overwrite.get()),  # 切分是否覆盖同名输出
+            'image_csv': image_csv,
+            'image_wp_site': image_wp_site,
+            'image_workers': image_workers_text,
         }
 
     def _lock_summary(self, settings):

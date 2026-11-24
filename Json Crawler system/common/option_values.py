@@ -48,18 +48,24 @@ def _clean_size_value(value):
     """保留统一尺码主体，移除括号/数字区间后缀并转换国家尺码。"""
     if not isinstance(value, str):
         return value
+    # One Size 后面的国家码、数字区间或说明都不再保留，统一成平台使用的标准值。
+    if re.search(r'(?<![A-Za-z])one[\s_-]*size(?![A-Za-z])', value, re.IGNORECASE):
+        return 'One Size'
     text = value.split('(', 1)[0].split('（', 1)[0].strip()
+    letter_sizes = (
+        {'S', 'M', 'L', 'OS', 'ONESIZE', 'ONE SIZE', 'FREE SIZE'}
+        | {'X' * count + 'S' for count in range(1, 6)}
+        | {'X' * count + 'L' for count in range(1, 6)}
+        | {f'{count}XL' for count in range(2, 11)}
+    )
+    compact_range = re.fullmatch(r'([A-Za-z]+)\s*\d+\s*[-–—]\s*\d+', text)
+    if compact_range and compact_range.group(1).upper() in letter_sizes:
+        return compact_range.group(1)
     if '/' in text:
         prefix, suffix = text.split('/', 1)
         prefix = prefix.strip()
         numeric_suffix = suffix.split('/', 1)[0]
         suffix_parts = numeric_suffix.replace('–', '-').replace('—', '-').replace(' ', '').split('-')
-        letter_sizes = (
-            {'S', 'M', 'L', 'OS', 'ONESIZE', 'ONE SIZE', 'FREE SIZE'}
-            | {'X' * count + 'S' for count in range(1, 6)}
-            | {'X' * count + 'L' for count in range(1, 6)}
-            | {f'{count}XL' for count in range(2, 11)}
-        )
         if (prefix.upper() in letter_sizes and len(suffix_parts) in (1, 2)
                 and all(part.isdigit() for part in suffix_parts)):
             text = prefix

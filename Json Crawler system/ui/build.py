@@ -72,6 +72,9 @@ class CrawlerBuild:
         self.split_parts = tk.StringVar(value='2')                # 均分拆分的份数（Spinbox 绑定）
         self.split_price_col = tk.StringVar(value='price1')        # 均分拆分的价格列（price1/price2，空=保持原序）
         self.split_overwrite = tk.BooleanVar(value=True)           # 是否覆盖同名输出
+        self.image_csv = tk.StringVar()
+        self.image_wp_site = tk.StringVar()
+        self.image_workers = tk.StringVar(value='8')
         self.status = tk.StringVar(value='就绪')                   # 底栏状态行文本
         self.lock_text = tk.StringVar(value='')                    # 底栏「本轮参数」摘要，运行中才填
         self.stats = tk.StringVar(value='')                        # 分析页统计文本（商品数 / 组合数）
@@ -87,7 +90,8 @@ class CrawlerBuild:
                     self.make_raw_prices, self.match_prices,
                     self.color, self.size, self.include_other_options,
                     self.color_images_only, self.gallery_image_limit, *self.option_limits.values(),
-                    self.split_mode, self.split_parts, self.split_price_col, self.split_overwrite):
+                    self.split_mode, self.split_parts, self.split_price_col, self.split_overwrite,
+                    self.image_csv, self.image_wp_site, self.image_workers):
             var.trace_add('write', lambda *_: self.on_setting_changed())
         self.refresh_paths()               # 初次同步一次路径相关显示状态
         self.show(1)                       # 默认停在阶段 01 链接采集页

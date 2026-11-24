@@ -2,7 +2,7 @@
 import tkinter as tk
 from tkinter import ttk
 
-from app.constants import NAMES, PROXY_SERVER
+from app.constants import NAMES, PAGE_NAMES, PROXY_SERVER
 from .glass import NavItem
 from .theme import (
     FOCUS, INPUT_BG, LINE, MUTED, PLACEHOLDER, PRIMARY,
@@ -28,8 +28,8 @@ class CrawlerPages:
         tk.Label(side, text='工作流程', bg=SIDE, fg=MUTED,
                  font=(self.ui_family, 10), anchor='w').pack(fill='x', padx=20, pady=(0, 8))
         self.nav = {}
-        for i in range(1, 5):
-            item = NavItem(side, i, NAMES[i], self.ui_family, self.mono_family, lambda n=i: self.show(n))
+        for i in range(1, 6):
+            item = NavItem(side, i, PAGE_NAMES[i], self.ui_family, self.mono_family, lambda n=i: self.show(n))
             item.pack(fill='x', padx=12, pady=(0, 4))
             self.nav[i] = item
 
@@ -51,7 +51,8 @@ class CrawlerPages:
         deck.rowconfigure(0, weight=1)
         deck.columnconfigure(0, weight=1)
         self.panels = {}
-        for i, build_page in enumerate((self._links, self._products, self._analysis, self._pricing), 1):
+        for i, build_page in enumerate((self._links, self._products, self._analysis,
+                                         self._pricing, self._image_download), 1):
             panel = ttk.Frame(deck)
             self.panels[i] = panel
             build_page(panel)
@@ -310,3 +311,25 @@ class CrawlerPages:
         ttk.Checkbutton(flows, text='按尺码匹配价格（价格匹配/）', variable=self.match_prices).pack(anchor='w')
         ttk.Label(flows, text='两项都不选时，仅合并和导出', style='Muted.TLabel').pack(anchor='w', pady=(12, 0))
         self.action(flows, '处理价格并导出', lambda: self.start([4])).pack_configure(pady=(16, 0))
+
+    def _image_download(self, panel):
+        self.heading(panel, PAGE_NAMES[5], '下载 WooCommerce CSV 的 Images，并改写为目标站上传路径')
+        self._section_header(panel, 'WP 导出文件', '可扫描当前项目的原价/价格匹配目录')
+        row = ttk.Frame(panel)
+        row.pack(fill='x')
+        ttk.Entry(row, textvariable=self.image_csv).pack(side='left', fill='x', expand=True)
+        ttk.Button(row, text='选择 CSV', command=self.browse_image_csv).pack(side='left', padx=(8, 0))
+        ttk.Button(row, text='扫描最新', command=lambda: self.refresh_wp_csv(force_latest=True)).pack(side='left', padx=(8, 0))
+        self.rule(panel, pady=(20, 16))
+        self._section_header(panel, '下载设置')
+        settings = ttk.Frame(panel)
+        settings.pack(fill='x')
+        ttk.Label(settings, text='目标 WordPress 地址', style='Muted.TLabel').pack(anchor='w', pady=(0, 8))
+        ttk.Entry(settings, textvariable=self.image_wp_site).pack(fill='x')
+        row = ttk.Frame(settings)
+        row.pack(fill='x', pady=(16, 0))
+        ttk.Label(row, text='并发线程', style='Muted.TLabel').pack(side='left')
+        ttk.Spinbox(row, from_=1, to=50, textvariable=self.image_workers, width=8).pack(side='left', padx=(12, 0))
+        ttk.Label(panel, text='下载成功的链接会替换为 /wp-content/uploads/ 年/月路径；失败项保留原链接并生成清单。',
+                  style='Muted.TLabel', wraplength=820, justify='left').pack(anchor='w', pady=(20, 0))
+        self.action(panel, '下载图片并生成新 CSV', lambda: self.start([6])).pack_configure(pady=(20, 0))

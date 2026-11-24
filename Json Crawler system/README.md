@@ -1,6 +1,6 @@
 # 商品采集与尺码梯度定价工作台
 
-本目录提供可独立启动的桌面工作台，依次完成分类链接采集、商品 JSON 采集、十字段 CSV 整理、十字段表切分及 WooCommerce CSV 导出。阶段四不生成 Shopify 中间表；尺码梯度定价以采集划线价为参考，在候选窗口（默认 ±25%）内选取库价，WP 导出完成后自动检查文件内的 SKU。
+本目录提供可独立启动的桌面工作台，依次完成分类链接采集、商品 JSON 采集、十字段 CSV 整理、十字段表切分、WooCommerce CSV 导出及 WP 图片下载。阶段四不生成 Shopify 中间表；尺码梯度定价以采集划线价为参考，在候选窗口（默认 ±25%）内选取库价，WP 导出完成后自动检查文件内的 SKU。
 
 ## 启动与环境
 
@@ -30,8 +30,9 @@ python3 "Json Crawler system/main.py"
 | 03 数据分析 | `Json/Data Analysis/*.json` | `CSV/<域名>_style.csv`、同名商品 JSON |
 | 03.1 切分 | `CSV/*_style.csv` | 均分 N 份或按 title 拆分，各含 CSV 与对应 JSON |
 | 04 价格与导出 | 默认 `CSV`，或指定 CSV / 目录 | 合并表、所选价格表、WooCommerce CSV、未使用库价 CSV |
+| 04.1 图片下载 | 阶段 04 的 `wp-*.csv` | `<WP 文件名>-images/`、`*-imageOK-时间戳.csv`、失败清单 |
 
-从头处理按 01 → 02 → 03 →（03.1 切分，可选）→ 04 分别执行。界面默认进入链接页，没有总览页或勾选多阶段批量运行的入口；每次只运行当前阶段，单独启动某阶段不会自动补跑前置阶段。
+从头处理按 01 → 02 → 03 →（03.1 切分，可选）→ 04 →（04.1 图片下载，可选）分别执行。图片下载页可扫描原价/价格匹配目录中的最新 WP 导出，也可手动选择；需要填写目标 WordPress 地址。下载成功的图片链接会替换为该站点当年当月的 uploads 路径，失败链接保留原值并生成失败 URL / SKU 清单。界面每次只运行当前阶段，单独启动某阶段不会自动补跑前置阶段。
 
 ## 阶段一：链接采集
 
@@ -245,6 +246,108 @@ SKU 由商品 md5 确定性派生（子变体 5-5-5、父级 SKU+8位数字）�
 
 代码入口为 `main.py → ui → controller.py → worker.py`。阶段入口统一为 `run(settings, stop, emit)`，数字前缀文件通过 `common/step_loader.py` 加载。公共模块负责模型、文本 / 描述清洗、选项取值、原子写入和款式编码。
 
+## 代码文件作用详解
+
+以下按目录列出全部 Python 源文件的职责。数字前缀文件（`00_`/`10_`/…/`99_`）只能通过 `common/step_loader.py` 按路径加载，阶段内通过 `alias_step` 把它们挂到 `config` / `logger` 等旧模块名上再 `import`。
+
+### 顶层入口与调度
+
+- `main.py` — 启动入口。创建 Tk 根窗口、实例化 `CrawlerApp` 并进入 `mainloop()`；被 import 时不弹窗，方便单测与复用。
+- `controller.py` — GUI 无关的串行调度器。后台线程按顺序为每个阶段起 `worker.py` 子进程，转发其事件行到 `queue.Queue`；提供软停止（touch 停止文件）与硬停止（terminate → kill）三步强退；用临时目录存放各阶段停止文件，任务结束整体清理。
+- `worker.py` — 子进程入口（`python -u worker.py <阶段号> <停止文件>`）。从 stdin 读一行 settings，按 `STAGES` 映射加载对应阶段目录的 `99_pipeline_entry.run()`，起监听线程轮询停止文件；把结果映射成退出码（0 成功 / 3 部分失败 / 2 停止 / 1 失败）。
+- `url_utils.py` — 兼容转发层：把 `normalize_url_dashes` / `normalize_request_url` 转给 `app.url_utils`，供阶段脚本用裸名 `from url_utils import ...` 调用。改逻辑请改 `app/` 那份。
+- `user_settings.json` — 本机设置（非代码文件）：记住上次项目目录与各功能开关。
+
+### app/（跨进程共享的常量与工具，不依赖 Tk / pandas）
+
+- `constants.py` — 跨进程共享常量：阶段号→名称映射（`NAMES` / `PAGE_NAMES`）、状态文案（`STATUS`）、事件行前缀（`PREFIX = '@@CRAWLER_EVENT@@'`）、固定代理（`PROXY_SERVER = 'http://127.0.0.1:7897'`）。
+- `project_paths.py` — 推断默认项目目录，优先级：`ANGLAN_PROJECT_DIR` 环境变量 → 上次仍存在的项目 → 仓库 `ANG_OUTPUT_XLSX` → 仓库根。
+- `url_utils.py` — URL 处理：`normalize_url_dashes`（各种 Unicode 破折号及其百分号编码统一成 `-`）、`normalize_request_url`（路径/查询/锚点按 UTF-8 百分号编码，保留已有转义与分隔符）。
+- `user_settings.py` — 读写本机 `user_settings.json`（`load_user_settings` / `save_user_settings`），读失败回退空字典、写失败静默忽略，绝不让 GUI 因配置文件崩溃。
+- `__init__.py` — 包说明（app 包不依赖 tkinter，阶段子进程可安全 import）。
+
+### common/（公共模型、清洗、编解码与原子写）
+
+- `product_model.py` — 核心数据对象。`Product` / `OptionDimension` dataclass；定义九个必需字段 + 五个可选字段；`__post_init__` 完成全部幂等清洗；提供 `to_dict` / `from_dict`（含 strict 校验）、`apply_policy`（keep→remove 降级重洗）、颜色/尺码维度名归一（`canonical_option_name` 等）。
+- `option_values.py` — 颜色/尺码取值清洗：删除 `\` 与 `&`、保序去重；尺码基础清洗 `_clean_size_value`（去括号/数字区间后缀、`L/10`→`L`、国家尺码转换 US/UK/AUS/FR/ITY、加宽码 1X~4X、One Size 统一）；`clean_product_option_values` 兼容汇总与原始 Shopify 两种结构。
+- `description_html.py` — 商品描述 HTML 清洗：手写 `HTMLParser` 删除链接/视频/脚本/表格等容器与 SKU、`Made in` 句，剥离标签属性、丢弃非 BMP 字符；`keep_images` 仅保留 `<img src>`、`keep_tables` 保留表格结构与 colspan/rowspan。
+- `product_text.py` — 标题与分类名清洗：`clean_product_title`（去表情/标点/符号，保留各语言文字数字）、`clean_category_name`（连字符换空格）。
+- `price_fallback.py` — 售价/划线价互补：`fill_missing_prices`，任一缺失/为零时用另一价格填，都缺失则空串。
+- `styles_codec.py` — 款式串对称编解码：`escape`/`unescape`（转义 `\&#@`）、`split`（只切未转义分隔符）、`encode_segment`/`decode_segment`（`值&名值$售价$划线价@图` 段）、`partition_image`（拆出图片）。
+- `atomic_io.py` — `replace_file`：同目录临时文件 + `os.replace` 原子替换，防止中途崩溃留下半截 JSON/CSV。
+- `step_loader.py` — 按路径加载数字前缀模块：`load_step`（合成模块名带父目录，避免各阶段同名文件互顶）、`alias_step`（把前缀文件挂到 `config` 等旧名）。
+- `browser.py` — 统一浏览器工厂 `create_browser`（随机端口 + 无痕 + 固定代理 + 重试），`find_browser_path` 按 CHROME_PATH→Chrome→Edge 探测；DrissionPage 缺失时降级不崩。
+- `stop.py` — `stopped(stop)` 停止信号判空检查。
+- `__init__.py` — 空包标记。
+
+### ui/（Tkinter 界面，四个 mixin 拼成 CrawlerApp）
+
+- `app.py` — `CrawlerApp` 类体（多继承 `CrawlerBuild` / `CrawlerPages` / `CrawlerDialogs` / `CrawlerRuntime`，本身为空）。
+- `build.py` — 界面骨架与 ttk 样式：窗口配置、`Controller` 实例、全部 StringVar/BooleanVar 绑定、`_styles`（圆角按钮/复选/单选/输入框/进度条等）、写监听触发 `on_setting_changed`。
+- `pages.py` — 五个页面布局：链接采集、商品采集、数据分析（含切分区与预览表格）、价格与导出、图片下载；底部状态栏/进度条/停止按钮。
+- `dialogs.py` — 路径选择与参数快照：`settings()` 做全量校验并拍成 dict（含跳图位置解析、定价规则校验）、`persist_settings`、目录浏览、`refresh_files`/`refresh_wp_csv`。
+- `runtime.py` — 任务启停与日志：`start`（校验→提交 controller→冻结 UI）、`stop`、`poll`（100ms 事件泵，唯一改控件处）、日志窗口管理与 `close`（三态关闭保护）。
+- `glass.py` — 控件素材：`rounded_image`（纯 Python 生成 PNG 圆角素材）、`indicator_image`（复选/单选图标）、`NavItem`（侧栏导航项）。
+- `theme.py` — 石墨灰 + 暖金色板与字体候选（`choose_font`）。
+- `__init__.py` — 空包标记。
+
+### stages/01_link_collector（分类链接采集）
+
+- `00_config.py` — 常量与 `CollectConfig`：重试/延迟参数、端口区间、索引与域名文件命名、CSV 编码。
+- `20_browser.py` — 阶段内浏览器封装：`create_browser`（委托 common.browser）、`run_js_with_retry`（带重试与停止检查）、`get_outer_html`、`evaluate_xpath`。
+- `30_collector.py` — 采集核心：`parse_categories`、`build_page_url`（Shopify `?page=N` 分页）、`extract_product_links`（HTML 正则三路交叉）、`extract_links_by_xpath`、`CollectorRunner`（逐分类分页 + 两级去重 + 首页重试）。
+- `40_file_utils.py` — 落盘：读旧域名 CSV/JSON、`update_link_index`、`save_results`（按域名分桶合并写三列 CSV）、损坏文件另存 recovery。
+- `80_logger.py` — 阶段内日志出口（写真实 stdout，经 worker 回传）。
+- `99_pipeline_entry.py` — 阶段入口 `run`：解析分类、建 `CollectorRunner`、跑采集、写失败清单、上报产物。
+
+### stages/02_product_scraper（商品 JSON 采集与九字段清洗）
+
+- `00_config.py` — 常量：商品间隔 `DELAY`、瞬时失败重试等待、`JSON_SUBDIR`/`JSON_ANALYSIS_DIR`、CSV 编码。
+- `20_browser.py` — `create_browser` 封装（委托 common.browser）。
+- `25_file_utils.py` — 文件读写：`read_targets`（读三列 CSV 或旧版 JSON 得 (分类,URL,md5)）、`save_json`（原子写汇总 JSON，统一走 Product 对象）。
+- `30_network.py` — 网络与 URL：`to_shopify_json_url`、`group_targets_by_json_url`、`fetch_json`（监听网络包取 JSON，30 秒超时）、币种识别 `extract_currency`/`detect_shop_currency_http`、汇率 `fetch_exchange_rates`/`prices_to_usd`（24 小时缓存）。
+- `40_product_analysis.py` — 商品解析：`parse_product_object`（原始 Shopify 商品 → 九字段）、尺码标准序列 `standardize_size_values`、跳图 `skip_image_indexes`/`filter_gallery_images`、补采判定 `needs_*_refresh`。
+- `50_scraper_runner.py` — 采集运行器 `ScraperRunner`：逐域名读目标、去重、断点续传、抓包解析、失败重试一次、批量原子刷盘（10 条或 15 秒）。
+- `80_logger.py` — 阶段内日志（`log_exc`）。
+- `99_pipeline_entry.py` — 阶段入口：收集输入文件、实例化运行器、写失败清单、上报产物。
+
+### stages/03_data_analysis（十字段 CSV 整理）
+
+- `00_config.py` — 常量：`SKIP_OPTIONS`（如 ships from 不参与组合）、`MAX_STYLES_LENGTH`（32000）、`CSV_FIELDS`（十一列表头契约）。
+- `10_option_split.py` — 拆行：颜色按上限切块 `chunk_values`/`option_limit_sets`、`restrict_product`（颜色块裁图）、`color_product_md5`（拆色派生 md5）、`parse_product_rows`（逐块解析）。
+- `30_product_parser.py` — 组合器：用 `exec` 把 `31`/`32` 两段拼进同一命名空间，对外仍是 `product_parser`。
+- `31_parser_part1.py` — 解析前半段：`is_analysis_product`、颜色/尺码别名、`analysis_options`、`build_option_combos`（笛卡尔积）、`format_image_url`（插入 600x600 尺寸后缀）、`_style_escape`。
+- `32_parser_part2.py` — 解析后半段：`_selected_product_combinations`、`parse_product`（拼十字段行）、`style_image_urls`、`_build_src_links`、`InvalidProductError`/`StylesTooLongError`。
+- `40_analyzer.py` — 组织层：`iter_products`（校验九字段记录）、`domain_groups`、`stat_options`、`expand_cartesian`（预览）、`build_ten_field_rows`（批量导出）。
+- `99_pipeline_entry.py` — 阶段入口：登记模块、统计/预览/导出分支、逐域名写 CSV + 配套 JSON、写失败清单。
+
+### stages/03_1_split（十字段表切分，stage 5）
+
+- `00_config.py` — 常量：分组列/价格列/默认份数、`MD5_COL`、两种模式常量、目录后缀。
+- `20_split.py` — 切分算法：`split_by_title`（按 title 分组、价格排序、按 md5 商品块轮询均分 N 份）、`split_by_title_each`（每个 title 一个文件）、`split_json_by_md5`（同步切分配套 JSON）、编码检测与文件名清洗。
+- `99_pipeline_entry.py` — 阶段入口：收集 `*_style.csv`、按模式分发、同步切分 JSON、上报产物。
+
+### stages/04_price_export（尺码梯度定价与 WooCommerce 导出）
+
+- `00_pricing_config.py` — 定价配置：232 档价格库、`DEFAULT_SPREAD_PERCENT`（30）、候选窗口（0.75~1.25）、`PriceRules` 与 `resolve_rules` 校验。
+- `10_merge.py` — 合并：`OutputPaths`、递归收集十字段表（排除原价/价格匹配/json、切分产物优先）、`_ensure_link_md5` 补算 md5、写合并表。
+- `11_fix_prices.py` — 原价修正：修正倒挂（D<C→D=C）、styles1 内嵌价修正（p2<p1→p2=p1），写原价表。
+- `12_match_prices.py` — 梯度定价核心：低价预处理、窗口内全局去重的库价匹配、尺码递增梯度取价、`variant_size`/`size_sort_key`/`spread_prices`、逐商品日志。
+- `13_unused_prices.py` — 未使用库价：库价与已用价做差集，导出 CSV。
+- `14_export_wp.py` — WP 导出：SKU 派生（父级 SKU+8 位、子变体 5-5-5）、变体展开、WP 商品树聚合、`check_wp_skus`（SKU 查重与孤立变体检查）。
+- `80_styles_utils.py` — styles1 工具：`parse_styles`（解码）、`fix_styles`（内嵌价修正）、`to_float`。
+- `90_pipeline.py` — 编排：按流程开关拼步骤表、`begin` 步骤边界停止检查、串起 merge→fix→match→unused→export。
+- `99_pipeline_entry.py` — 阶段接口：解析价差/窗口参数、调 `pipeline.run`、上报产物目录。
+
+### stages/04_1_image_downloader（WP 图片下载，stage 6）
+
+- `20_downloader.py` — 下载核心：`split_urls`/`split_image_values`、`_image_data`（PIL 校验并统一转 JPEG）、`run_download`（并发下载、去重、原子写新 CSV、失败清单）。
+- `99_pipeline_entry.py` — 阶段入口：校验 CSV 与 WP 地址、并发数、调 `run_download`。
+
+### tests/
+
+- `test_stage_04_1_image_downloader.py` — 图片下载器单测：URL 过滤去重、成功改写/失败保留、failed_skus 清单（用 mock 替代 requests 与 PIL）。
+
 阶段目录与职责：
 
 - `stages/01_link_collector`：分类链接采集。
@@ -252,6 +355,7 @@ SKU 由商品 md5 确定性派生（子变体 5-5-5、父级 SKU+8位数字）�
 - `stages/03_data_analysis`：十字段 CSV 整理。
 - `stages/03_1_split`：十字段表切分（均分 N 份 / 按 title 拆分，含 JSON 同步），运行时以 stage 5 拉起，UI 入口在阶段三页面。
 - `stages/04_price_export`：尺码梯度定价与 WooCommerce 导出。
+- `stages/04_1_image_downloader`：独立下载 WP CSV 的 Images 列并生成替换链接后的新 CSV（worker stage 6；不依赖独立图片下载器脚本）。
 
 阶段四关键文件为：
 

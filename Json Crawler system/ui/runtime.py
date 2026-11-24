@@ -21,6 +21,14 @@ class CrawlerRuntime:
             settings = self.settings()    # dialogs.settings() 做全量校验并拍快照，非法即抛错
             if 1 in stages and not settings['categories']:
                 raise ValueError('请先在链接采集页填写分类列表')
+            if 6 in stages:
+                if not settings['image_csv'] or not Path(settings['image_csv']).is_file():
+                    raise ValueError('请选择阶段 04 导出的 WP CSV 文件')
+                if not settings['image_wp_site'].startswith('https://'):
+                    raise ValueError('请填写以 https:// 开头的目标 WordPress 地址')
+                if not settings['image_workers'].isdecimal() or not 1 <= int(settings['image_workers']) <= 50:
+                    raise ValueError('图片并发数必须是 1 到 50 之间的整数')
+                settings['image_workers'] = int(settings['image_workers'])
             settings['action'] = action
             self.controller.start(stages, settings)  # 只投递给后台线程/子进程，不在此阻塞
         except Exception as exc:
