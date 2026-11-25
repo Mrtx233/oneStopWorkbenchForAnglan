@@ -38,19 +38,16 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageOps
 
-from product_data import atomic_json, atomic_output, clean_pasted_path, find_color_map, safe_product_folder
+from product_data import (atomic_json, atomic_output, clean_pasted_path, find_color_map,
+                          safe_product_folder, create_contact_sheets, IMAGE_SUFFIXES,
+                          CONTACT_SHEET_COLUMNS, CONTACT_CELL_SIZE, CONTACT_GAP, CONTACT_LABEL_SIZE)
 
 # ---------------- 配置 ----------------
 MAX_WORKERS = 8          # 并发线程数
 RETRY = 3                # 失败重试次数
 TIMEOUT = 30             # 单张超时(秒)
-CONTACT_SHEET_COLUMNS = 5
-CONTACT_CELL_SIZE = (220, 180)
-CONTACT_GAP = 2
-CONTACT_LABEL_SIZE = (70, 50)
-IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
               "AppleWebKit/537.36 (KHTML, like Gecko) "
               "Chrome/124.0 Safari/537.36")
@@ -65,99 +62,6 @@ def make_headers(url):
         "Referer": referer,
     }
 
-
-def _contact_sheet_font():
-    try:
-        return ImageFont.truetype("arial.ttf", 24)
-    except OSError:
-        try:
-            return ImageFont.load_default(size=24)
-        except TypeError:
-            return ImageFont.load_default()
-
-
-def create_contact_sheets(images_dir):
-    """为 images 目录下每个商品文件夹生成五列编号拼图。
-
-    输出到 images/_contact_sheets/<md5>.jpg，不修改或移动原图。
-    """
-    if not os.path.isdir(images_dir):
-        return None, 0, 0
-
-    contact_dir = os.path.join(images_dir, "_contact_sheets")
-    os.makedirs(contact_dir, exist_ok=True)
-    folders = sorted(
-        (name for name in os.listdir(images_dir)
-         if name.casefold() != "_contact_sheets"
-         and os.path.isdir(os.path.join(images_dir, name))),
-        key=str.casefold,
-    )
-    font = _contact_sheet_font()
-    resampling = getattr(Image, "Resampling", Image).LANCZOS
-    generated = 0
-    unreadable = 0
-    total = len(folders)
-
-    for folder_index, folder_name in enumerate(folders, start=1):
-        if folder_index == 1 or folder_index % 10 == 0 or folder_index == total:
-            print(f"\r拼图进度: {folder_index}/{total}", end="", flush=True)
-
-        folder_path = os.path.join(images_dir, folder_name)
-        image_names = []
-        for filename in os.listdir(folder_path):
-            stem, extension = os.path.splitext(filename)
-            if extension.lower() in IMAGE_SUFFIXES and stem.isdecimal():
-                image_names.append(filename)
-        image_names.sort(key=lambda name: (int(os.path.splitext(name)[0]), name.casefold()))
-        if not image_names:
-            continue
-
-        cell_width, cell_height = CONTACT_CELL_SIZE
-        rows = (len(image_names) + CONTACT_SHEET_COLUMNS - 1) // CONTACT_SHEET_COLUMNS
-        sheet_width = CONTACT_SHEET_COLUMNS * cell_width + (CONTACT_SHEET_COLUMNS + 1) * CONTACT_GAP
-        sheet_height = rows * cell_height + (rows + 1) * CONTACT_GAP
-        sheet = Image.new("RGB", (sheet_width, sheet_height), (238, 238, 238))
-        draw = ImageDraw.Draw(sheet)
-
-        for cell_index, filename in enumerate(image_names):
-            stem = os.path.splitext(filename)[0]
-            image_number = int(stem)
-            column = cell_index % CONTACT_SHEET_COLUMNS
-            row = cell_index // CONTACT_SHEET_COLUMNS
-            x = CONTACT_GAP + column * (cell_width + CONTACT_GAP)
-            y = CONTACT_GAP + row * (cell_height + CONTACT_GAP)
-            image_path = os.path.join(folder_path, filename)
-            try:
-                with Image.open(image_path) as source:
-                    thumbnail = source.convert("RGB")
-                    thumbnail.thumbnail(CONTACT_CELL_SIZE, resampling)
-                tile = Image.new("RGB", CONTACT_CELL_SIZE, (255, 255, 255))
-                tile_x = (cell_width - thumbnail.width) // 2
-                tile_y = (cell_height - thumbnail.height) // 2
-                tile.paste(thumbnail, (tile_x, tile_y))
-                sheet.paste(tile, (x, y))
-            except Exception:
-                unreadable += 1
-                draw.rectangle((x, y, x + cell_width - 1, y + cell_height - 1),
-                               fill=(255, 245, 245))
-                draw.text((x + 8, y + 65), "LOAD ERROR", fill=(160, 0, 0), font=font)
-
-            label_width, label_height = CONTACT_LABEL_SIZE
-            draw.rectangle((x, y, x + label_width - 1, y + label_height - 1), fill=(0, 0, 0))
-            label = str(image_number)
-            bbox = draw.textbbox((0, 0), label, font=font)
-            text_width, text_height = bbox[2] - bbox[0], bbox[3] - bbox[1]
-            text_x = x + max(2, (label_width - text_width) // 2) - bbox[0]
-            text_y = y + max(2, (label_height - text_height) // 2) - bbox[1]
-            draw.text((text_x, text_y), label, fill=(255, 220, 0), font=font)
-
-        output_path = os.path.join(contact_dir, f"{folder_name}.jpg")
-        sheet.save(output_path, format="JPEG", quality=90, optimize=True)
-        generated += 1
-
-    if total:
-        print()
-    return contact_dir, generated, unreadable
 
 def _product_colors(item):
     if not isinstance(item, dict):
@@ -309,15 +213,16 @@ def _existing_image(prefix):
         return None
 
 
-def _process(json_path, out_dir):
+def _process(json_path, out_dir, fill_single=True):
     with open(json_path, encoding="utf-8-sig") as f:
         data = json.load(f)
     # Validate the complete input before changing even one single-color value.
     tasks, skipped = build_tasks(data, out_dir)
 
     # 单色商品：把第一张图片 URL 填入 Color 选项的空值，并写回 json
-    filled = fill_single_color_urls(data)
+    filled = fill_single_color_urls(data) if fill_single else 0
     if filled:
+        print("提示：单色补链接将修改原 JSON；已有 color_matcher.py 进度会因 source_sha256 变化而失效。可使用 --no-fill-single 保持原文件不变。")
         atomic_json(json_path, data)
         print(f"已为 {filled} 个单色颜色选项填入第一张图片 URL，并写回 {json_path}")
 
@@ -390,6 +295,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="下载商品多色图片，补齐单色链接并生成编号拼图")
     parser.add_argument("json_file", nargs="?", help="商品 JSON 文件")
     parser.add_argument("output_dir", nargs="?", help="图片目录，默认 JSON 同目录下的 images")
+    parser.add_argument("--no-fill-single", action="store_true", help="不补齐单色链接，保持原 JSON 只读")
     args = parser.parse_args(argv)
     try:
         json_value = args.json_file
@@ -407,7 +313,7 @@ def main(argv=None):
             parser.error(f"JSON 文件不存在：{json_path}")
         if out_dir.exists() and not out_dir.is_dir():
             parser.error(f"图片输出路径不是文件夹：{out_dir}")
-        return _process(json_path, out_dir)
+        return _process(json_path, out_dir, fill_single=not args.no_fill_single)
     except (EOFError, KeyboardInterrupt):
         print("输入或下载已取消；已完整保存的图片可在下次运行时复用。")
         return 130
@@ -418,66 +324,3 @@ def main(argv=None):
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-# 你是商品数据处理助手。我会给你两个路径，请按下面的流程完成“图片颜色识别 → 回填 JSON 的 Color 字段”。
-#
-# ## 输入
-# 1. 商品 JSON：<粘贴 JSON 路径>
-# 2. 图片目录：<粘贴 images 路径>
-#
-# ## 已知约定（不要质疑，直接按此理解）
-# - 图片目录下每个子文件夹名 = 该商品的 md5（对应 JSON 里的 md5 字段）
-# - 子文件夹内文件按 JSON 中 images 数组的原始顺序命名：000.jpg / 001.png / 002.jpg …
-#   （即 003.jpg ↔ images[3]，扩展名可能是 jpg 或 png）
-# - 多色商品的 options 里 Color 的 value 是空字符串，需要我来填；单色商品可能已填好，不要改动
-#
-# ## 执行步骤
-#
-# ### 第 1 步：体检，先出结论再动手
-# - 统计商品总数、有 Color 选项的商品数、Color 值全空/部分空/已填满的商品数
-# - 核对：每个待处理商品的 md5 文件夹是否存在、文件夹内图片数是否等于 images 数组长度
-# - 若某商品图片数 < 颜色数，或文件夹缺失，**不要猜**，单独列为“数据异常”清单
-#
-# ### 第 2 步：只处理“多色且 Color 为空”的商品
-# 单色商品（Color 只有 1 个键）和无 Color 选项的商品，原样保留，一个字段都不改。
-#
-# ### 第 3 步：逐商品生成编号拼图
-# - 每个商品把它的所有图片拼成一张图：每行 5 张，每张 300×400，图片左上角画黑底黄字的序号（从 0 开始，与文件名序号一致）
-# - 拼图只用于识别，不要覆盖原图
-#
-# ### 第 4 步：颜色识别
-# - 每张拼图调用一次视觉识别，提问里**必须列出该商品的全部颜色选项名**，并明确“只能从这些颜色里选”
-# - 要求输出格式：`0=颜色名 1=颜色名 …`，数量必须与图片数一致
-# - 允许同一颜色对应多张图（同款多角度）
-# - 遇到两种颜色极其接近（如 Light Blue / Blue、Sage Green / Green、Dusty Pink / Pink），按色相深浅和图案区分，并在结果里标注“低置信”
-#
-# ### 第 5 步：回填 JSON
-# 对每个商品：
-# - 每个颜色取**序号最小的那张命中图**作为该颜色的主图，写进 `options[0].Color[颜色名]`
-# - 写入的值是**原 images 数组里对应的 URL**（不是本地路径），保持原样带 `?v=` 参数
-# - 该 URL 从 `images` 数组中**删除**（避免颜色和 images 重复）
-# - 剩余图片（同色多角度、细节图、街拍图）**按原顺序保留**在 `images` 里
-# - 其他字段（url / title / fennei / body_html / price / compare_at_price / option_counts / currency / size_mode / description_image_mode / description_table_mode / md5）**一律不得改动**
-# - 颜色名必须与 options 中原始键名**完全一致**（含大小写、空格、`{'name': 'color', 'value': 'Red'}` 这种脏键名要原样保留）
-#
-# ### 第 6 步：校验（必须全部通过才交付）
-# - 每个商品：颜色链接数 + images 剩余数 = 原 images 总数（图片守恒，不能丢也不能重复）
-# - 同一 URL 不能同时出现在 Color 和 images 里
-# - 颜色值为空的项 = 0（除第 7 步列出的例外）
-# - 所有写入的 URL 都必须来自该商品原 images 数组
-# - 非 images/options 字段逐字段比对，差异 = 0
-#
-# ### 第 7 步：无法匹配的不要硬凑
-# 如果某个颜色选项在图片里确实找不到（比如选项写 Khaki 但 7 张图里没有卡其色）：
-# - 该颜色**留空**
-# - 在最终报告里单独列出：商品 md5、商品名、缺哪个颜色、各图片实际颜色对照表
-# - 绝不为了凑满而错配
-#
-# ## 输出
-# 1. 新的 JSON 文件，命名 `<原文件名>_filled.json`，与原文件同目录（无写权限时先写到我的工作区并告知）
-# 2. 一份处理报告，包含：
-#    - 体检结果（各类型商品数量）
-#    - 处理结果（已填满商品数、颜色链接总数）
-#    - 校验结果（第 6 步每项的具体数字）
-#    - 待人工清单（缺色的商品 + 原因 + 图片颜色对照表）
-#    - 低置信判断（同色系难分的商品，说明我为什么这么定）

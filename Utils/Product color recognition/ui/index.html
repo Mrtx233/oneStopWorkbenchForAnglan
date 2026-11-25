@@ -124,6 +124,16 @@
     .color-footer details { margin-top: 8px; }
     .path { overflow-wrap: anywhere; }
     .empty-list { padding: 16px 8px; color: var(--muted); font-size: 12px; }
+    .candidates { display: grid; gap: 6px; margin: 12px 0; }
+    .candidate-row { display: flex; gap: 6px; flex-wrap: wrap; }
+    .candidate-row .accept { color: var(--gold); }
+    .zoom { position: absolute; transform: translateX(-100%); margin: 4px 0 0 -4px; padding: 2px 6px; min-height: 28px; background: #17191cef; color: var(--text); border: 1px solid var(--line); border-radius: 4px; font-size: 12px; }
+    dialog { width: min(1100px, 96vw); max-height: 94dvh; padding: 16px; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 12px; }
+    dialog::backdrop { background: #000b; }
+    .preview-head, .preview-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .preview-head h2 { font-size: 16px; }
+    .preview-image { display: block; width: 100%; max-height: 70dvh; object-fit: contain; margin: 12px 0; background: var(--inset); }
+    .preview-footer p { color: var(--muted); font-size: 12px; }
     @media (max-width: 1199px) {
       .app { height: auto; min-height: 100vh; grid-template-columns: 216px minmax(0, 1fr); grid-template-rows: minmax(660px, calc(100dvh - 32px)) auto; }
       .colors { grid-column: 1 / -1; }
@@ -199,6 +209,7 @@
           <button class="button primary" id="recognizeAll" disabled>本地识别全部</button>
           <button class="button" id="recognizeOne" disabled>识别当前商品</button>
           <button class="button quiet" id="confirmAll" disabled>确认本商品结果</button>
+          <button class="button" id="stopRecognition" hidden>停止识别</button>
         </div>
         <div class="job" id="job">仅处理未确认颜色，保留人工结果。</div>
         <progress id="progress" max="1" value="0" aria-label="本地识别进度" hidden></progress>
@@ -220,9 +231,15 @@
       </div>
     </aside>
   </div>
+  <dialog id="imagePreview" aria-labelledby="previewTitle">
+    <div class="preview-head"><h2 id="previewTitle">原图预览</h2><button class="small" id="closePreview" autofocus>关闭 · Esc</button></div>
+    <img id="previewImage" class="preview-image" alt="商品原图">
+    <div class="preview-footer"><p id="previewInfo" role="status"></p><button class="button primary" id="adoptPreview" hidden>采用此图</button></div>
+  </dialog>
   <script>
     let state = null, currentId = null, activeColor = null, query = '';
     let busy = false, loading = false, refreshChain = Promise.resolve();
+    let previewContext = null;
     const el = id => document.getElementById(id);
     const esc = value => String(value == null ? '' : value).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
     // Display translations only; API payloads always keep the original color key.
@@ -250,6 +267,9 @@
       'chocolate': '巧克力色', 'caramel': '焦糖色', 'rust': '铁锈色', 'terracotta': '陶土色',
       'coral': '珊瑚色', 'mint': '薄荷绿', 'mint green': '薄荷绿', 'turquoise': '绿松石色',
       'aqua': '水蓝色', 'lilac': '丁香紫', 'mauve': '藕紫色', 'violet': '紫罗兰色',
+      'oatmeal': '燕麦色', 'mocha': '摩卡色', 'indigo': '靛蓝色', 'denim': '牛仔蓝',
+      'tan': '棕褐色', 'cream white': '奶油白', 'dark khaki': '深卡其色',
+      'light brown': '浅棕色', 'ash gray': '烟灰色',
       'lemon yellow': '柠檬黄', 'rose gold': '玫瑰金', 'denim blue': '牛仔蓝',
       'multicolor': '彩色', 'multicolour': '彩色', 'multi color': '彩色',
       'multi colour': '彩色', 'colorful': '彩色', 'colourful': '彩色',
@@ -344,6 +364,25 @@
       renderColors(selected()); renderSheet(selected()); renderJob();
       notice('已选择 ' + colorLabel(name) + '，点击对应图片即可绑定并自动保存。');
     }
+    function candidatesFor(c) {
+      const d = c.detection || {};
+      const values = Array.isArray(d.candidates) && d.candidates.length ? d.candidates : [d];
+      const seen = new Set();
+      return values.filter(v => v && Number.isInteger(v.image_index) && v.image_index >= 0 && !seen.has(v.image_index) && seen.add(v.image_index)).slice(0, 3);
+    }
+    function closePreview() { el('imagePreview').close(); previewContext = null; el('previewImage').removeAttribute('src'); }
+    function openPreview(id, index, color = null) {
+      const p = state?.products.find(p => p.id === id);
+      if (!p || !Number.isInteger(index) || index < 0 || index >= p.image_count) return;
+      previewContext = {id, index, color};
+      el('previewTitle').textContent = (p.title || '商品') + ' · 图片 #' + index;
+      el('previewInfo').textContent = color ? '采用后绑定到 ' + colorLabel(color) + '，并自动保存。' : '高清原图 · 可缩放浏览器页面查看细节';
+      el('adoptPreview').hidden = color === null;
+      el('adoptPreview').disabled = busy;
+      el('previewImage').onerror = () => { el('previewInfo').textContent = '原图读取失败，请检查本地图片文件。'; el('adoptPreview').disabled = true; };
+      el('previewImage').src = '/api/image?id=' + encodeURIComponent(id) + '&index=' + encodeURIComponent(index);
+      if (!el('imagePreview').open) el('imagePreview').showModal();
+    }
     function renderColors(p) {
       const box = el('colorList'), scroll = box.scrollTop;
       const expanded = new Set([...box.querySelectorAll('.color-card')].filter(card => card.querySelector('details')?.open).map(card => card.dataset.color));
@@ -359,12 +398,26 @@
         let extra = '';
         if (d.reason) extra += '<div class="reason">' + (['manual_done', 'auto_confirmed', 'manual_pending'].includes(c.status) ? '此前识别：' : '') + esc(d.reason) + '</div>';
         if (Number.isInteger(d.image_index)) extra += '<div class="metrics">候选 #' + d.image_index + (Number.isFinite(d.delta_e) ? ' · 色差 ' + d.delta_e : '') + (Number.isFinite(d.margin) ? ' · 区分度 ' + d.margin : '') + '</div>';
-        card.innerHTML = '<div class="color-row"><div><h3 class="color-name">' + esc(c.name) + '</h3>' + (translation ? '<div class="color-translation">' + esc(translation) + '</div>' : '') + '</div><span class="image-number">' + (Number.isInteger(c.assigned_index) ? '#' + c.assigned_index : '—') + '</span></div><div class="status-label ' + esc(c.status) + '">' + esc(c.status_label) + '</div>' + extra + '<details class="value"><summary>' + (c.url ? '已绑定 URL' : '尚未绑定图片') + '</summary>' + esc(c.url || '未成功的候选不会写入 JSON') + '</details><div class="actions"><button class="small choose" aria-pressed="' + (activeColor === c.name) + '">' + (activeColor === c.name ? '正在选图' : (c.url ? '调整图片' : '选择图片')) + '</button>' + (c.status === 'auto_success' ? '<button class="small confirm">确认识别</button>' : '') + (c.status === 'auto_failed' && Number.isInteger(d.image_index) ? '<button class="small accept">采用候选</button>' : '') + (c.url ? '<button class="small clear">清除</button>' : '') + '</div>';
+        card.innerHTML = '<div class="color-row"><div><h3 class="color-name">' + esc(c.name) + '</h3>' + (translation ? '<div class="color-translation">' + esc(translation) + '</div>' : '') + '</div><span class="image-number">' + (Number.isInteger(c.assigned_index) ? '#' + c.assigned_index : '—') + '</span></div><div class="status-label ' + esc(c.status) + '">' + esc(c.status_label) + '</div>' + extra + '<details class="value"><summary>' + (c.url ? '已绑定 URL' : '尚未绑定图片') + '</summary>' + esc(c.url || '未成功的候选不会写入 JSON') + '</details><div class="actions"><button class="small choose" aria-pressed="' + (activeColor === c.name) + '">' + (activeColor === c.name ? '正在选图' : (c.url ? '调整图片' : '选择图片')) + '</button>' + (c.status === 'auto_success' ? '<button class="small confirm">确认识别</button>' : '') + (Number.isInteger(c.assigned_index) ? '<button class="small preview">看大图</button>' : '') + (c.url ? '<button class="small clear">清除</button>' : '') + '</div>';
         card.querySelector('details').open = expanded.has(c.name);
         card.querySelector('.choose').onclick = () => selectColor(c.name);
         card.querySelector('.confirm')?.addEventListener('click', () => confirm(c.name));
-        card.querySelector('.accept')?.addEventListener('click', () => assign(d.image_index, c.name));
+        card.querySelector('.preview')?.addEventListener('click', () => openPreview(p.id, c.assigned_index, c.name));
         card.querySelector('.clear')?.addEventListener('click', () => assign(null, c.name));
+        if (c.status === 'auto_failed') {
+          const group = document.createElement('div'); group.className = 'candidates';
+          for (const candidate of candidatesFor(c)) {
+            const row = document.createElement('div'), adopt = document.createElement('button'), preview = document.createElement('button');
+            row.className = 'candidate-row'; adopt.className = 'small accept'; preview.className = 'small';
+            adopt.textContent = '#' + candidate.image_index + (Number.isFinite(candidate.delta_e) ? ' · ΔE00 ' + candidate.delta_e : '') + (Number.isFinite(candidate.share) ? ' · ' + Math.round(candidate.share * 100) + '%' : '');
+            adopt.title = candidate.reason || candidate.warning || '采用候选并保存';
+            adopt.onclick = () => assign(candidate.image_index, c.name);
+            preview.textContent = '看大图'; preview.setAttribute('aria-label', '预览 ' + colorLabel(c.name) + ' 候选 #' + candidate.image_index);
+            preview.onclick = () => openPreview(p.id, candidate.image_index, c.name);
+            row.append(adopt, preview); group.append(row);
+          }
+          card.append(group);
+        }
         box.append(card);
       }
       box.scrollTop = scroll;
@@ -386,7 +439,7 @@
       for (const cell of p.cells) {
         const hit = document.createElement('button');
         const owners = p.colors.filter(c => c.assigned_index === cell.image_index), owner = owners[0];
-        const suggested = active?.status === 'auto_failed' && active.detection?.image_index === cell.image_index;
+        const suggested = active?.status === 'auto_failed' && candidatesFor(active).some(c => c.image_index === cell.image_index);
         hit.className = 'hit' + (owner ? (owner.status === 'auto_success' ? ' auto' : owner.status === 'existing' ? '' : ' manual') : '') + (suggested ? ' suggested' : '') + (owners.some(c => c.name === activeColor) ? ' selected' : '');
         Object.assign(hit.style, {left: cell.left + '%', top: cell.top + '%', width: cell.width + '%', height: cell.height + '%'});
         hit.title = '图片 ' + cell.image_index + (owners.length ? ' · ' + owners.map(c => colorLabel(c.name) + ' · ' + c.status_label).join('；') : '');
@@ -397,8 +450,13 @@
           label.textContent = owners.map(c => colorLabel(c.name)).join(' / ') + ' · ' + (owner.status === 'auto_success' ? '自动' : owner.status === 'existing' ? '原有链接' : '人工确认');
           hit.append(label);
         }
-        hit.onclick = () => activeColor === null ? notice('先在颜色选项中选择颜色，再点击对应图片。') : assign(cell.image_index, activeColor);
-        layer.append(hit);
+        hit.onclick = event => event.shiftKey || activeColor === null ? openPreview(p.id, cell.image_index, activeColor) : assign(cell.image_index, activeColor);
+        hit.oncontextmenu = event => { event.preventDefault(); openPreview(p.id, cell.image_index, activeColor); };
+        const zoom = document.createElement('button'); zoom.className = 'zoom'; zoom.textContent = '放大';
+        zoom.setAttribute('aria-label', '查看图片 #' + cell.image_index + ' 原图');
+        Object.assign(zoom.style, {left: (cell.left + cell.width) + '%', top: cell.top + '%'});
+        zoom.onclick = () => openPreview(p.id, cell.image_index, activeColor);
+        layer.append(hit, zoom);
       }
       frame.append(image, layer); area.append(frame);
       area.scrollTop = top; area.scrollLeft = left;
@@ -407,7 +465,7 @@
         area.innerHTML = '<div class="empty">拼图读取失败，请检查图片目录后刷新。</div>';
         el('sheetFooter').textContent = '拼图不可用，暂时无法点击选图。';
       };
-      el('sheetFooter').innerHTML = p.cells.length + ' 张图片 · ' + (activeColor === null ? '先选颜色，再点图片' : '当前颜色：' + esc(colorLabel(activeColor))) + '<span class="scroll-hint">编号对应原 images 索引 · 图片区可横向滚动</span>';
+      el('sheetFooter').innerHTML = p.cells.length + ' 张图片 · ' + (activeColor === null ? '先选颜色，再点图片' : '当前颜色：' + esc(colorLabel(activeColor))) + '<span class="scroll-hint">右键 / Shift + 点击 / 放大按钮查看原图 · ← → 切换 · N 待复核 · Enter 确认</span>';
     }
     function renderJob() {
       const p = selected(), j = state?.job;
@@ -415,14 +473,17 @@
       el('recognizeOne').disabled = !p?.colors.length || busy || j?.running;
       el('confirmAll').disabled = busy || !p?.colors.some(c => c.status === 'auto_success');
       el('save').disabled = !state || busy;
+      el('stopRecognition').hidden = !j?.running;
+      el('stopRecognition').disabled = busy || Boolean(j?.stopping);
+      el('stopRecognition').textContent = j?.stopping ? '正在停止…' : '停止识别';
       el('prev').disabled = el('next').disabled = !visibleProducts().length;
       el('nextReview').disabled = !state?.products.some(p => p.review_count > 0);
-      document.querySelectorAll('#colorList button, .hit').forEach(button => { button.disabled = busy; });
+      document.querySelectorAll('#colorList button, .hit, .zoom').forEach(button => { button.disabled = busy; });
       el('colorList').setAttribute('aria-busy', String(busy));
       if (!j) return;
       el('progress').hidden = !j.running; el('progress').max = Math.max(j.total, 1); el('progress').value = j.completed;
       el('job').classList.toggle('error', Boolean(j.error));
-      el('job').textContent = j.error || (j.running ? '正在识别 ' + j.completed + ' / ' + j.total + ' · ' + j.current : j.total ? '识别完成 ' + j.completed + ' / ' + j.total + ' · 用时 ' + j.elapsed + ' 秒' : '仅处理未确认颜色，保留人工标注、人工确认和人工清除。');
+      el('job').textContent = j.error || (j.running ? (j.stopping ? '正在停止，保留已保存结果 ' : '正在识别 ') + j.completed + ' / ' + j.total + ' · ' + j.current : j.total ? (j.stopped ? '识别已停止 ' : '识别完成 ') + j.completed + ' / ' + j.total + ' · 用时 ' + j.elapsed + ' 秒' : '仅处理未确认颜色，保留人工标注、人工确认和人工清除。');
     }
     function render() {
       renderList(); el('outputPath').textContent = state?.output || '';
@@ -443,7 +504,7 @@
           if (keep !== undefined && state.products.some(p => p.id === keep)) currentId = keep;
           else if (!state.products.some(p => p.id === currentId)) { currentId = state.products[0]?.id ?? null; activeColor = null; }
           render();
-          if (oldRunning && !state.job.running) notice(state.job.error || '识别完成，可筛选待复核商品，逐项确认或调整。', state.job.error ? 'error' : 'success');
+          if (oldRunning && !state.job.running) notice(state.job.error || (state.job.stopped ? '识别已停止，已完成结果已保留。' : '识别完成，可筛选待复核商品，逐项确认或调整。'), state.job.error ? 'error' : 'success');
         } finally { loading = false; }
       });
       refreshChain = task; return task;
@@ -467,6 +528,7 @@
       finally { busy = false; renderJob(); }
     }
     function move(delta, reviewOnly = false) {
+      if (busy) return;
       const list = reviewOnly ? (state?.products || []).filter(p => p.review_count > 0) : visibleProducts();
       if (!list.length) { notice('没有符合条件的商品。'); return; }
       const i = list.findIndex(p => p.id === currentId);
@@ -477,6 +539,26 @@
     el('prev').onclick = () => move(-1); el('next').onclick = () => move(1); el('nextReview').onclick = () => move(1, true);
     el('recognizeAll').onclick = () => recognize(true); el('recognizeOne').onclick = () => recognize(false);
     el('confirmAll').onclick = () => confirm(null); el('save').onclick = () => mutate('/api/save', {}, '已保存 JSON 和识别复核进度。');
+    el('stopRecognition').onclick = async () => {
+      try { await request('/api/recognize/stop', {}); await reload(); notice('已请求停止，将在当前图片分析结束后安全退出。'); }
+      catch (error) { notice(error.message, 'error'); }
+    };
+    el('closePreview').onclick = closePreview;
+    el('imagePreview').addEventListener('cancel', event => { event.preventDefault(); closePreview(); });
+    el('adoptPreview').onclick = () => {
+      if (busy || !previewContext || previewContext.color === null) return;
+      const {id, index, color} = previewContext; closePreview();
+      mutate('/api/assign', {id, color, image_index: index}, '已采用预览图片并自动保存。');
+    };
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && el('imagePreview').open) { event.preventDefault(); closePreview(); return; }
+      if (event.isComposing || event.ctrlKey || event.altKey || event.metaKey || busy || el('imagePreview').open) return;
+      if (event.target.closest('input, select, textarea, [contenteditable]:not([contenteditable="false"])')) return;
+      if (event.key === 'ArrowLeft') { event.preventDefault(); move(-1); }
+      else if (event.key === 'ArrowRight') { event.preventDefault(); move(1); }
+      else if (event.key.toLowerCase() === 'n') { event.preventDefault(); move(1, true); }
+      else if (event.key === 'Enter' && selected()?.colors.some(c => c.status === 'auto_success')) { event.preventDefault(); confirm(null); }
+    });
     renderJob();
     reload().catch(error => notice('读取失败：' + error.message, 'error'));
     setInterval(() => { if (state?.job.running && !busy && !loading) reload().catch(error => notice(error.message, 'error')); }, 1500);

@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 import argparse
-from collections import Counter
+from collections import Counter, OrderedDict
 import copy
 import hashlib
 import json
@@ -25,12 +25,12 @@ import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
-from typing import Any, Callable
-
-from PIL import Image, ImageDraw, ImageFont
+from typing import Any
 
 from local_color_recognition import extract_features, recognize_product
 from product_data import (
+    IMAGE_SUFFIXES, CONTACT_SHEET_COLUMNS, CONTACT_CELL_SIZE, CONTACT_GAP,
+    CONTACT_LABEL_SIZE, create_contact_sheets,
     atomic_json as _atomic_json,
     clean_pasted_path as _clean_pasted_path,
     find_color_map as _find_color_map,
@@ -38,119 +38,20 @@ from product_data import (
 )
 
 
-IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
-CONTACT_SHEET_COLUMNS = 5
-CONTACT_CELL_SIZE = (220, 180)
-CONTACT_GAP = 2
-CONTACT_LABEL_SIZE = (70, 50)
-
-
 def _image_for_index(folder: Path, index: int) -> tuple[Path | None, str | None]:
+    if type(index) is not int or index < 0:
+        return None, "图片序号无效"
     stem = f"{index:03d}"
     matches = [path for path in folder.glob(stem + ".*")
                if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES]
     if len(matches) == 1:
-        return matches[0], None
+        resolved = matches[0].resolve()
+        if not resolved.is_relative_to(folder.resolve()):
+            return None, "图片路径超出商品目录"
+        return resolved, None
     if not matches:
         return None, "找不到该序号图片"
     return None, "同一序号存在多个图片文件，无法确定使用哪一个"
-
-
-def _contact_sheet_font() -> ImageFont.ImageFont:
-    try:
-        return ImageFont.truetype("arial.ttf", 24)
-    except OSError:
-        try:
-            return ImageFont.load_default(size=24)
-        except TypeError:
-            return ImageFont.load_default()
-
-
-def create_contact_sheets(
-    images_root: Path,
-    progress_callback: Callable[[int, int], None] | None = None,
-) -> tuple[Path, int, int]:
-    """为图片根目录下每个 MD5 图片文件夹生成五列序号拼图。
-
-    拼图写入 images_root/_contact_sheets/<md5>.jpg；原始序号图片保持不变。
-    返回 (拼图目录, 成功生成数量, 无法读取的原图数量)。
-    """
-    output_dir = images_root / "_contact_sheets"
-    if not images_root.is_dir():
-        return output_dir, 0, 0
-
-    folders = sorted(
-        (path for path in images_root.iterdir()
-         if path.is_dir() and path.name.casefold() != "_contact_sheets"),
-        key=lambda path: path.name.casefold(),
-    )
-    output_dir.mkdir(parents=True, exist_ok=True)
-    font = _contact_sheet_font()
-    resampling = getattr(Image, "Resampling", Image).LANCZOS
-    generated = 0
-    unreadable = 0
-
-    for folder_index, folder in enumerate(folders, start=1):
-        if progress_callback is not None:
-            progress_callback(folder_index, len(folders))
-        image_files = sorted(
-            (path for path in folder.iterdir()
-             if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES and path.stem.isdecimal()),
-            key=lambda path: (int(path.stem), path.name.casefold()),
-        )
-        if not image_files:
-            continue
-        sheet_path = output_dir / f"{folder.name}.jpg"
-        try:
-            # Directory time also changes when an image is deleted or renamed.
-            newest_source = max(folder.stat().st_mtime_ns,
-                                *(path.stat().st_mtime_ns for path in image_files))
-            if sheet_path.is_file() and sheet_path.stat().st_mtime_ns >= newest_source:
-                continue
-        except OSError:
-            pass
-
-        rows = (len(image_files) + CONTACT_SHEET_COLUMNS - 1) // CONTACT_SHEET_COLUMNS
-        cell_width, cell_height = CONTACT_CELL_SIZE
-        sheet_width = CONTACT_SHEET_COLUMNS * cell_width + (CONTACT_SHEET_COLUMNS + 1) * CONTACT_GAP
-        sheet_height = rows * cell_height + (rows + 1) * CONTACT_GAP
-        sheet = Image.new("RGB", (sheet_width, sheet_height), (238, 238, 238))
-        draw = ImageDraw.Draw(sheet)
-
-        for cell_index, image_path in enumerate(image_files):
-            number = int(image_path.stem)
-            column = cell_index % CONTACT_SHEET_COLUMNS
-            row = cell_index // CONTACT_SHEET_COLUMNS
-            x = CONTACT_GAP + column * (cell_width + CONTACT_GAP)
-            y = CONTACT_GAP + row * (cell_height + CONTACT_GAP)
-            try:
-                with Image.open(image_path) as source:
-                    thumbnail = source.convert("RGB")
-                    thumbnail.thumbnail(CONTACT_CELL_SIZE, resampling)
-                tile = Image.new("RGB", CONTACT_CELL_SIZE, (255, 255, 255))
-                tile_x = (cell_width - thumbnail.width) // 2
-                tile_y = (cell_height - thumbnail.height) // 2
-                tile.paste(thumbnail, (tile_x, tile_y))
-                sheet.paste(tile, (x, y))
-                label = str(number)
-            except Exception:
-                unreadable += 1
-                draw.rectangle((x, y, x + cell_width - 1, y + cell_height - 1), fill=(255, 245, 245))
-                draw.text((x + 8, y + 65), "图片读取失败", fill=(160, 0, 0), font=font)
-                label = str(number)
-
-            label_width, label_height = CONTACT_LABEL_SIZE
-            draw.rectangle((x, y, x + label_width - 1, y + label_height - 1), fill=(0, 0, 0))
-            bbox = draw.textbbox((0, 0), label, font=font)
-            text_width, text_height = bbox[2] - bbox[0], bbox[3] - bbox[1]
-            text_x = x + max(2, (label_width - text_width) // 2) - bbox[0]
-            text_y = y + max(2, (label_height - text_height) // 2) - bbox[1]
-            draw.text((text_x, text_y), label, fill=(255, 220, 0), font=font)
-
-        sheet.save(sheet_path, format="JPEG", quality=90, optimize=True)
-        generated += 1
-
-    return output_dir, generated, unreadable
 
 
 MANUAL_LABEL_PLATFORM_HTML = (
@@ -160,6 +61,8 @@ MANUAL_LABEL_PLATFORM_HTML = (
 
 class ManualLabelPlatform:
     """原始索引始终引用输入 JSON；识别来源和复核状态只写入进度侧车文件。"""
+
+    FEATURE_CACHE_LIMIT = 256
 
     def __init__(self, json_path: Path, images_root: Path, output_path: Path):
         self.json_path = json_path.resolve()
@@ -181,8 +84,9 @@ class ManualLabelPlatform:
         self.lock = threading.RLock()
         self.stop_event = threading.Event()
         self.worker: threading.Thread | None = None
-        self.feature_cache: dict[tuple[str, int, int], dict[str, Any]] = {}
-        self.job = {'running': False, 'total': 0, 'completed': 0, 'current': '', 'error': '', 'elapsed': 0}
+        self.feature_cache: OrderedDict[tuple[str, int, int], dict[str, Any]] = OrderedDict()
+        self.job = {'running': False, 'stopping': False, 'stopped': False,
+                    'total': 0, 'completed': 0, 'current': '', 'error': '', 'elapsed': 0}
         self._load_progress()
 
     def _product_colors(self, item: Any) -> tuple[dict[str, Any], str | None]:
@@ -199,6 +103,9 @@ class ManualLabelPlatform:
         saved = json.loads(self.progress_path.read_text(encoding='utf-8-sig'))
         if not isinstance(saved, dict) or saved.get('source_sha256') != self.source_hash:
             raise ValueError('进度文件与输入 JSON 不匹配，请选择当初的原始 JSON，或用 --output 指定新文件')
+        if saved.get('output_sha256') and self.output_path.exists():
+            if hashlib.sha256(self.output_path.read_bytes()).hexdigest() != saved['output_sha256']:
+                raise ValueError('输出 JSON 与进度文件不一致，请恢复配套文件或用 --output 指定新文件')
         for product_id, colors in saved.get('assignments', {}).items():
             try:
                 index = int(product_id)
@@ -244,9 +151,10 @@ class ManualLabelPlatform:
             self.assignments.get(index, {}).pop(name, None)
             self.origins.get(index, {}).pop(name, None)
 
-    def _progress_payload(self) -> dict[str, Any]:
+    def _progress_payload(self, output_hash: str | None = None) -> dict[str, Any]:
         return {
             'version': 2, 'source_sha256': self.source_hash,
+            **({'output_sha256': output_hash} if output_hash else {}),
             'assignments': {str(index): values for index, values in self.assignments.items()},
             'origins': {str(index): values for index, values in self.origins.items()},
             'detections': {str(index): values for index, values in self.detections.items()},
@@ -348,28 +256,41 @@ class ManualLabelPlatform:
                 continue
             original = self.source_data[product_id]
             original_colors, _ = self._product_colors(original)
-            images = original.get('images')
+            images = original.get('images', [])
+            if not isinstance(images, list):
+                raise ValueError('images 必须是数组，拒绝生成可能丢图的输出')
             for name in colors:
                 if (product_id, name) in self.cleared:
                     colors[name] = ''
                 elif name in self.assignments.get(product_id, {}):
                     colors[name] = images[self.assignments[product_id][name]]
-            final_urls = {value for value in colors.values() if isinstance(value, str) and value.strip()}
-            remaining = [url for url in images if not isinstance(url, str) or url not in final_urls] if isinstance(images, list) else None
-            # 更改已有链接时，退回原来只存在于 Color 的图片，防止无声丢失。
-            returned = [value for name, value in original_colors.items()
-                        if isinstance(value, str) and value.strip() and value != colors[name] and value not in final_urls]
-            if remaining is not None:
-                for value in returned:
+            # Treat original Color links overlapping images as references to the
+            # same inventory. Preserve repeated source entries (one allocation
+            # consumes one occurrence), and return Color-only URLs in key order.
+            inventory = list(images)
+            available = Counter(url for url in images if isinstance(url, str))
+            original_links = Counter()
+            for value in original_colors.values():
+                if isinstance(value, str) and value.strip():
+                    original_links[value] += 1
+                    if original_links[value] > available[value]:
+                        inventory.append(value)
+            remaining = list(inventory)
+            for value in colors.values():
+                if isinstance(value, str) and value.strip():
                     if value not in remaining:
-                        remaining.append(value)
-                item['images'] = remaining
+                        raise ValueError('颜色分配违反图片守恒，拒绝保存')
+                    remaining.remove(value)
+            item['images'] = remaining
         return result
 
     def save(self) -> None:
         with self.lock:
+            if hashlib.sha256(self.json_path.read_bytes()).hexdigest() != self.source_hash:
+                raise ValueError('原始 JSON 已发生变化，拒绝写入与 source_sha256 不一致的进度')
             _atomic_json(self.output_path, self._build_output())
-            _atomic_json(self.progress_path, self._progress_payload())
+            output_hash = hashlib.sha256(self.output_path.read_bytes()).hexdigest()
+            _atomic_json(self.progress_path, self._progress_payload(output_hash))
 
     def _validate_product(self, product_id: int, color: str | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
         if type(product_id) is not int or not 0 <= product_id < len(self.source_data):
@@ -443,12 +364,22 @@ class ManualLabelPlatform:
                 self._validate_product(product_id)
             ids = [product_id] if product_id is not None else list(range(len(self.source_data)))
             ids = [index for index in ids if self._eligible(index)]
-            self.job = {'running': bool(ids), 'total': len(ids), 'completed': 0, 'current': '', 'error': '', 'elapsed': 0}
+            self.job = {'running': bool(ids), 'stopping': False, 'stopped': False,
+                        'total': len(ids), 'completed': 0, 'current': '', 'error': '', 'elapsed': 0}
             if not ids:
                 return
             self.stop_event.clear()
             self.worker = threading.Thread(target=self._run_recognition, args=(ids,), daemon=True, name='local-color-recognition')
             self.worker.start()
+
+    def stop_recognition(self) -> dict[str, Any]:
+        # Do not claim idle until the worker has really exited: this prevents
+        # an immediate restart from reviving the previous job via event.clear().
+        with self.lock:
+            if self.job['running']:
+                self.stop_event.set()
+                self.job['stopping'] = True
+            return dict(self.job)
 
     def _run_recognition(self, ids: list[int]) -> None:
         started = time.monotonic()
@@ -459,9 +390,10 @@ class ManualLabelPlatform:
                 item = self.source_data[product_id]
                 with self.lock:
                     self.job['current'] = str(item.get('title') or item.get('md5') or '')
-                self._recognize_one(product_id)
+                completed = self._recognize_one(product_id)
                 with self.lock:
-                    self.job['completed'] += 1
+                    if completed:
+                        self.job['completed'] += 1
                     self.job['elapsed'] = round(time.monotonic() - started, 1)
         except Exception as exc:
             with self.lock:
@@ -469,16 +401,34 @@ class ManualLabelPlatform:
         finally:
             with self.lock:
                 self.job['running'] = False
+                self.job['stopped'] = self.stop_event.is_set()
+                self.job['stopping'] = False
+                self.job['current'] = ''
                 self.job['elapsed'] = round(time.monotonic() - started, 1)
 
-    def _recognize_one(self, product_id: int) -> None:
+    def _cached_features(self, path: Path) -> dict[str, Any]:
+        stat = path.stat()
+        key = (str(path.resolve()), stat.st_mtime_ns, stat.st_size)
+        with self.lock:
+            if key in self.feature_cache:
+                self.feature_cache.move_to_end(key)
+                return self.feature_cache[key]
+        feature = extract_features(path)
+        with self.lock:
+            self.feature_cache[key] = feature
+            self.feature_cache.move_to_end(key)
+            while len(self.feature_cache) > self.FEATURE_CACHE_LIMIT:
+                self.feature_cache.popitem(last=False)
+        return feature
+
+    def _recognize_one(self, product_id: int) -> bool:
         item = self.source_data[product_id]
         images = item.get('images') if isinstance(item.get('images'), list) else []
         folder = _safe_product_folder(self.images_root, item.get('md5'))
         features = {}
         for index, url in enumerate(images):
             if self.stop_event.is_set():
-                return
+                return False
             if not isinstance(url, str) or not url.strip():
                 continue
             path, issue = _image_for_index(folder, index) if folder else (None, 'MD5 图片文件夹不存在')
@@ -486,32 +436,53 @@ class ManualLabelPlatform:
                 features[index] = {'error': issue or '图片文件不存在'}
                 continue
             try:
-                stat = path.stat()
-                key = (str(path), stat.st_mtime_ns, stat.st_size)
-                if key not in self.feature_cache:
-                    self.feature_cache[key] = extract_features(path)
-                features[index] = self.feature_cache[key]
-            except (OSError, ValueError) as exc:
+                features[index] = self._cached_features(path)
+            except (OSError, ValueError, SyntaxError) as exc:
                 features[index] = {'error': f'图片无法读取：{exc}'}
         with self.lock:
             if self.stop_event.is_set():
-                return
+                return False
             colors, _ = self._product_colors(item)
             eligible = self._eligible(product_id)
             if not eligible:
-                return
+                return True
             reserved = {self._color_state(product_id, name)['url'] for name in colors if name not in eligible}
-            detections = recognize_product(list(colors), features, reserved, images, targets=eligible)
+        detections = recognize_product(list(colors), features, reserved, images, targets=eligible)
+        with self.lock:
+            if self.stop_event.is_set():
+                return False
+            # Manual edits may have happened while extracting/scoring; revalidate
+            # eligibility and reservations at commit time, under the same lock.
+            eligible = [name for name in eligible if name in self._eligible(product_id)]
+            reserved = {self._color_state(product_id, name)['url'] for name in colors if name not in eligible}
             # 重算只替换尚未人工确认的自动结果；原索引和人工状态始终不动。
             for name in eligible:
                 self.assignments.get(product_id, {}).pop(name, None)
                 self.origins.get(product_id, {}).pop(name, None)
                 info = detections[name]
+                if info['status'] == 'success' and images[info['image_index']] in reserved:
+                    info = {**info, 'status': 'review', 'reason': '候选已被人工绑定给其他颜色，请复核'}
                 self.detections.setdefault(product_id, {})[name] = info
                 if info['status'] == 'success':
                     self.assignments.setdefault(product_id, {})[name] = info['image_index']
                     self.origins.setdefault(product_id, {})[name] = 'auto'
             self.save()
+            return True
+
+    def image_path(self, product_id: int, image_index: int) -> Path:
+        item, _ = self._validate_product(product_id)
+        images = item.get('images')
+        if (not isinstance(images, list) or type(image_index) is not int
+                or not 0 <= image_index < len(images)
+                or not isinstance(images[image_index], str) or not images[image_index].strip()):
+            raise ValueError('图片序号超出原 JSON images 数组范围或 URL 无效')
+        folder = _safe_product_folder(self.images_root, item.get('md5'))
+        if folder is None or not folder.is_dir():
+            raise ValueError('MD5 图片文件夹无效')
+        path, issue = _image_for_index(folder, image_index)
+        if issue:
+            raise ValueError(issue)
+        return path
 
     def sheet_path(self, product_id: int) -> Path:
         if type(product_id) is not int or not 0 <= product_id < len(self.source_data):
@@ -521,7 +492,9 @@ class ManualLabelPlatform:
         folder = _safe_product_folder(self.images_root, md5)
         if folder is None:
             raise ValueError('MD5 图片文件夹无效')
-        contact_root = (self.images_root / '_contact_sheets').resolve()
+        contact_root = _safe_product_folder(self.images_root, '_contact_sheets')
+        if contact_root is None:
+            raise ValueError('拼图目录超出图片根目录')
         path = (contact_root / (str(md5) + '.jpg')).resolve()
         if not path.is_relative_to(contact_root) or not path.is_file():
             raise FileNotFoundError('拼图不存在')
@@ -556,16 +529,19 @@ def _make_handler(platform: ManualLabelPlatform):
                 with platform.lock:
                     self._json(platform.state())
                 return
-            if parsed.path == "/api/sheet":
+            if parsed.path in {"/api/sheet", "/api/image"}:
                 try:
-                    product_id = int(parse_qs(parsed.query).get("id", [""])[0])
+                    query = parse_qs(parsed.query)
+                    product_id = int(query.get("id", [""])[0])
                     with platform.lock:
-                        path = platform.sheet_path(product_id)
+                        path = (platform.image_path(product_id, int(query.get("index", [""])[0]))
+                                if parsed.path == "/api/image" else platform.sheet_path(product_id))
                         body = path.read_bytes()
                     self.send_response(200)
                     self.send_header("Content-Type", mimetypes.guess_type(path.name)[0] or "image/jpeg")
                     self.send_header("Content-Length", str(len(body)))
                     self.send_header("Cache-Control", "no-cache")
+                    self.send_header("X-Content-Type-Options", "nosniff")
                     self.end_headers()
                     self.wfile.write(body)
                 except (ValueError, FileNotFoundError, OSError) as exc:
@@ -574,7 +550,7 @@ def _make_handler(platform: ManualLabelPlatform):
             self._json({"error": "接口不存在"}, 404)
 
         def do_POST(self) -> None:
-            if self.path not in {"/api/assign", "/api/save", "/api/recognize", "/api/confirm"}:
+            if self.path not in {"/api/assign", "/api/save", "/api/recognize", "/api/recognize/stop", "/api/confirm"}:
                 self._json({"error": "接口不存在"}, 404)
                 return
             try:
@@ -595,6 +571,8 @@ def _make_handler(platform: ManualLabelPlatform):
                     with platform.lock:
                         platform.assign(product_id, color, image_index)
                     self._json({"ok": True})
+                elif self.path == "/api/recognize/stop":
+                    self._json({"ok": True, "job": platform.stop_recognition()})
                 elif self.path == "/api/recognize":
                     product_id = payload.get("id")
                     if product_id is not None and type(product_id) is not int:

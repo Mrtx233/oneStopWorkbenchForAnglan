@@ -2,6 +2,7 @@
 import re
 from html import escape
 from html.parser import HTMLParser
+from common.description_policy import strip_description_policy
 
 
 # 清理规则：元素子树文本命中任一条，就移除该元素；
@@ -415,8 +416,10 @@ def clean_body_html(body_html, *, keep_images=False, keep_tables=False):
     链接、视频及其他清洗规则始终生效。"""
     if not body_html:
         return ''
+    # 邮箱/外站链接在 a 标签被基础清洗丢弃前，先删除其所在整段，避免留下客服残句。
+    prepared = strip_description_policy(str(body_html))
     parser = CleanBodyHtmlParser(keep_images=keep_images, keep_tables=keep_tables)
-    parser.feed(str(body_html))
+    parser.feed(prepared)
     parser.close()
     html = parser.get_html()
     if parser.removed_tables:  # 删过表格才清理悬空引用，普通描述完全不受影响
@@ -427,5 +430,12 @@ def clean_body_html(body_html, *, keep_images=False, keep_tables=False):
             parser = CleanBodyHtmlParser(keep_images=keep_images, keep_tables=keep_tables)
             parser.feed(without_refs)
             parser.close()
-            return parser.get_html()
+            html = parser.get_html()
+    without_policy = strip_description_policy(html, clear_policy_only=False)
+    if without_policy != html:
+        # 删掉内嵌货号后整理相邻空白与空壳，首次输出即是稳定结果。
+        parser = CleanBodyHtmlParser(keep_images=keep_images, keep_tables=keep_tables)
+        parser.feed(without_policy)
+        parser.close()
+        return strip_description_policy(parser.get_html(), clear_policy_only=False)
     return html

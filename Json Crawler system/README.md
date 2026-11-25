@@ -102,6 +102,14 @@ Color / Colour / Colors / Colours / 颜色 归一为 `Color`，Size / Sizes / �
 
 产地与 SKU 按三条规则清理：元素内文本命中 `sku`（前后不接字母）时移除该元素；`made in` 仅在元素文本以它开头（允许前置符号与空白）且整段就是这一句时移除该元素；不在任何标签内的裸文本按行命中后删除整行。以 `Made in` 开头的整句也会从句中摘除，同段其余句子保留。清洗后没有有效内容的标签及因此变空的祖先标签会移除；保留表格时仍保留空的 `td` / `th` 单元格，以免改变表格列结构。标签之间及标签内部由排版产生的换行、Tab 和缩进空白会压缩或删除，保留有效文字与标签层级。
 
+来源货号与店铺政策由 `common/description_policy.py` 继续清理：`Product ID` 后的 10 位大写字母数字、`SPU` 与 `Article number` 的标签和编号一起移除，支持混在长段落或被多个行内标签拆开的写法，同段其他商品文字保留。物流时效、运费、清关、追踪、预购、退换退款、支付 FAQ、隐私安全政策及来源店铺联系方式按整段删除。政策标题后的正文即使没有关键词，也删除到下一个同级或更高的普通标题；明确的商品详情、材质、尺码表等标题可在任意层级恢复商品内容，独立容器内的删除不延伸到容器外。促销与商品信息同处一个 `<p>`、以 `<br>` 分隔时，先按换行拆段，再删除促销部分；含邮箱的段落仍整体删除。
+
+零残留清单保存在 `DESCRIPTION_KEYWORDS`，不区分大小写，按子串匹配，短语兼容空白和行内标签拆分。`scan_description_keywords()` 同时扫描 HTML（包括保留的图片地址）和合并后的正文，返回全部 48 项计数；图片地址命中时删除图片。`article` 容器会去掉标签并保留商品正文，避免标签名本身触发 `Article` 残留。图片和表格的保留开关不会绕过这些规则。续跑阶段二会对已有汇总记录同样应用新规则；已有阶段三或后续导出需重新生成。
+
+原始 HTML 在删除链接前先检查邮箱和外站地址：任意含邮箱的段落、列出的来源站点域名、Facebook / Instagram / YouTube / TikTok / Twitter / Pinterest 引流入口都删除，邮箱只在 `mailto:` 地址中时也生效。周年促销、感谢光临、Happy Shopping、Add to Cart、限价和顾客背书等店铺话术，以及 See more、Fit Finder、How to choose your size、Size guide help you 等导航也删除；实际商品尺码表和尺码数值继续按表格开关处理。
+
+FAQ / 政策页在没有商品信息时清空，避免留下 Contact us 或无关键词的问答。判断使用原始正文中的货号、Fabric、Pattern、Product Details、Size Chart、Model，以及清洗后仍保留的材质和服装特征；仅在退货等政策中提到 dress、cotton 等泛称不算商品详情，缺少字段名本身也不会导致正常商品介绍被清空。相同段落和重复详情块只保留首次出现的一份，忽略行内加粗与排版空白的差异；不同图片、不同参数值保留，表格内的重复行和单元格不参与去重。
+
 旧记录开启保留图片或表格时需要补采，因为旧清洗已删除的内容无法从汇总恢复；从保留切换为删除时可直接重新清洗已有记录。已处于保留模式的旧图片也会清除 `src` 以外的属性。运行中改变任一开关下一轮生效。
 
 跳图按完整相册编号：`2,3` 跳过第二、三张，`-1,-2` 跳过最后两张，留空不跳。颜色图与普通相册分开整理。
@@ -270,7 +278,8 @@ SKU 由商品 md5 确定性派生（子变体 5-5-5、父级 SKU+8位数字）�
 
 - `product_model.py` — 核心数据对象。`Product` / `OptionDimension` dataclass；定义九个必需字段 + 五个可选字段；`__post_init__` 完成全部幂等清洗；提供 `to_dict` / `from_dict`（含 strict 校验）、`apply_policy`（keep→remove 降级重洗）、颜色/尺码维度名归一（`canonical_option_name` 等）。
 - `option_values.py` — 颜色/尺码取值清洗：删除 `\` 与 `&`、保序去重；尺码基础清洗 `_clean_size_value`（去括号/数字区间后缀、`L/10`→`L`、国家尺码转换 US/UK/AUS/FR/ITY、加宽码 1X~4X、One Size 统一）；`clean_product_option_values` 兼容汇总与原始 Shopify 两种结构。
-- `description_html.py` — 商品描述 HTML 清洗：手写 `HTMLParser` 删除链接/视频/脚本/表格等容器与 SKU、`Made in` 句，剥离标签属性、丢弃非 BMP 字符；`keep_images` 仅保留 `<img src>`、`keep_tables` 保留表格结构与 colspan/rowspan。
+- `description_html.py` — 商品描述 HTML 清洗：手写 `HTMLParser` 删除链接/视频/脚本/表格等容器与 SKU、`Made in` 句，剥离标签属性、丢弃非 BMP 字符；`keep_images` 仅保留 `<img src>`、`keep_tables` 保留表格结构与 colspan/rowspan；随后统一调用货号与政策清理。
+- `description_policy.py` — 跨行内标签移除来源货号，按段落和标题范围删除政策、联系方式、引流和店铺话术；识别纯政策页、合并重复段落，并提供 48 项关键词残留扫描。
 - `product_text.py` — 标题与分类名清洗：`clean_product_title`（去表情/标点/符号，保留各语言文字数字）、`clean_category_name`（连字符换空格）。
 - `price_fallback.py` — 售价/划线价互补：`fill_missing_prices`，任一缺失/为零时用另一价格填，都缺失则空串。
 - `styles_codec.py` — 款式串对称编解码：`escape`/`unescape`（转义 `\&#@`）、`split`（只切未转义分隔符）、`encode_segment`/`decode_segment`（`值&名值$售价$划线价@图` 段）、`partition_image`（拆出图片）。
@@ -346,6 +355,7 @@ SKU 由商品 md5 确定性派生（子变体 5-5-5、父级 SKU+8位数字）�
 
 ### tests/
 
+- `test_description_html.py` — 描述清洗回归：货号、政策、邮箱链接、外站及社媒、话术导航、纯政策页、重复块、48 项零残留、图片/表格开关、旧记录清洗与重复清洗稳定性。运行：`python -B -m unittest discover -s "Json Crawler system/tests"`。
 - `test_stage_04_1_image_downloader.py` — 图片下载器单测：URL 过滤去重、成功改写/失败保留、failed_skus 清单（用 mock 替代 requests 与 PIL）。
 
 阶段目录与职责：
