@@ -4,3 +4,4 @@ pandas
 certifi
 requests
 lxml
+Pillow>=9.1
