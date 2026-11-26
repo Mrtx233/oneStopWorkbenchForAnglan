@@ -616,6 +616,8 @@ class LinkBrowserApp:
 
             style="Modern.Treeview",
         )
+        self.listbox.tag_configure("row_even", background=C["input"])
+        self.listbox.tag_configure("row_odd", background=C["card"])
 
         self.listbox.column(
             "id",
@@ -1573,10 +1575,10 @@ class LinkBrowserApp:
 
         self._clear_detail()
 
-        for batch in sorted(
+        for row_index, batch in enumerate(sorted(
             self.tree,
             reverse=True,
-        ):
+        )):
 
             total = sum(
                 len(items)
@@ -1596,6 +1598,7 @@ class LinkBrowserApp:
                     "",
                     "",
                 ),
+                tags=("row_odd" if row_index % 2 else "row_even",),
             )
 
         self.set_status(
@@ -1655,7 +1658,7 @@ class LinkBrowserApp:
             ),
         )
 
-        for type_name in ordered:
+        for row_index, type_name in enumerate(ordered):
 
             items = types[
                 type_name
@@ -1677,6 +1680,7 @@ class LinkBrowserApp:
                     "",
                     "",
                 ),
+                tags=("row_odd" if row_index % 2 else "row_even",),
             )
 
     def show_links(
@@ -1774,7 +1778,7 @@ class LinkBrowserApp:
 
         self._current_items = items
 
-        for record in items:
+        for row_index, record in enumerate(items):
 
             status = record.get(
                 "status",
@@ -1792,6 +1796,7 @@ class LinkBrowserApp:
                     record.get("note", ""),
                     "复制",
                 ),
+                tags=("row_odd" if row_index % 2 else "row_even",),
 
             )
 

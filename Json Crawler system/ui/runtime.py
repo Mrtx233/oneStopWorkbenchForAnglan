@@ -59,13 +59,16 @@ class CrawlerRuntime:
         # 若日志窗口已打开且存活，才同步写进文本框。必须在 Tk 主线程调用（poll 里调）。
         self.logs.append(text)
         if self.log_window is not None and self.log_window.winfo_exists():
+            # 仅在追加前已位于底部时跟随；用户向上翻阅后保留当前位置。
+            follow_tail = self.log_text.yview()[1] >= 1.0
             # 文本框平时是 disabled 防误编辑，写入时临时解、写完再锁回去。
             self.log_text.configure(state='normal')
             self.log_text.insert('end', text)
             # 超过 8000 行删掉开头 2000 行，防窗口内存与滚动卡顿（缓冲已由 deque 兜底）。
             if int(self.log_text.index('end-1c').split('.')[0]) > 8000:
                 self.log_text.delete('1.0', '2000.0')
-            self.log_text.see('end')       # 自动滚到底
+            if follow_tail:
+                self.log_text.see('end')
             self.log_text.configure(state='disabled')
 
     def show_logs(self):
@@ -103,6 +106,7 @@ class CrawlerRuntime:
         self.log_text.bind('<FocusOut>', lambda _e: frame.configure(highlightbackground=LINE))
         scrollbar.configure(command=self.log_text.yview)
         self.log_text.insert('end', ''.join(self.logs))  # 回放本次会话已积累的全部日志
+        self.log_text.see('end')           # 首次打开查看最新日志，后续滚动由用户控制。
         self.log_text.configure(state='disabled')
 
     def clear_log(self):
